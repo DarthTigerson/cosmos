@@ -175,6 +175,9 @@ export default function App() {
         body: JSON.stringify({ message: text, session_id: sessionId }),
       })
 
+      // Session is created on the backend before the first byte — update sidebar now
+      fetchSessions()
+
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
