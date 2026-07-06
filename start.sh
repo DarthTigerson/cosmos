@@ -3,6 +3,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Kill any leftover processes from a previous run
+echo "Cleaning up any existing processes..."
+lsof -ti :8002 | xargs kill -9 2>/dev/null || true
+lsof -ti :5173 | xargs kill -9 2>/dev/null || true
+sleep 1
+
 echo "Starting Cosmos backend..."
 cd "$SCRIPT_DIR/backend"
 source /Users/thomas/.local/bin/env
@@ -25,8 +31,8 @@ echo "Press Ctrl+C to stop."
 cleanup() {
     echo "Stopping Cosmos..."
     kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
-    pkill -P $BACKEND_PID 2>/dev/null
-    pkill -P $FRONTEND_PID 2>/dev/null
+    lsof -ti :8002 | xargs kill -9 2>/dev/null || true
+    lsof -ti :5173 | xargs kill -9 2>/dev/null || true
     echo "Cosmos stopped."
 }
 trap cleanup INT TERM

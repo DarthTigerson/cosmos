@@ -16,7 +16,7 @@ CHROMA_PATH = os.getenv("CHROMA_PATH", "./data/chroma")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 # Only surface knowledge chunks above this cosine similarity
-KNOWLEDGE_THRESHOLD = float(os.getenv("KNOWLEDGE_THRESHOLD", "0.55"))
+KNOWLEDGE_THRESHOLD = float(os.getenv("KNOWLEDGE_THRESHOLD", "0.35"))
 
 
 async def init_memory():

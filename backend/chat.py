@@ -76,15 +76,19 @@ async def _build_system(query: str, tools: list[dict]) -> str:
             source = meta.get("show", "Podcast")
             episode = meta.get("episode", "")
             pub = meta.get("pub_date", "")[:10]
-            label = f"{source}"
+            label = source
             if episode:
                 label += f" — {episode}"
             if pub:
                 label += f" ({pub})"
-            lines.append(f"- [{label}] {m['content']}")
-        sections.append(f"Relevant knowledge from ingested content:\n" + "\n".join(lines))
+            snippet = m['content'][:400].rsplit(' ', 1)[0] + "…"
+            lines.append(f"- [{label}] {snippet}")
+        sections.append("Relevant knowledge from ingested content:\n" + "\n".join(lines))
 
-    return base + "\n\n" + "\n\n".join(sections)
+    system = base + "\n\n" + "\n\n".join(sections)
+    if knowledge:
+        print(f"[chat] injecting {len(knowledge)} knowledge chunks into system prompt")
+    return system
 
 
 def _load_session_from_db(session_id: str) -> list[dict]:
