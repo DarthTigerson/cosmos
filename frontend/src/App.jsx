@@ -1,18 +1,30 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
 
-const SESSION_ID = 'cosmos-' + Math.random().toString(36).slice(2, 8)
+function newSessionId() {
+  return 'cosmos-' + Math.random().toString(36).slice(2, 8)
+}
 
 function parseStream(text) {
   const trimmed = text.trimStart()
   const complete = trimmed.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/)
-  if (complete) {
-    return { content: complete[2].trimStart(), thinking: complete[1].trim() }
-  }
-  if (trimmed.startsWith('<think>')) {
-    return { content: '', thinking: trimmed.slice(7) }
-  }
+  if (complete) return { content: complete[2].trimStart(), thinking: complete[1].trim() }
+  if (trimmed.startsWith('<think>')) return { content: '', thinking: trimmed.slice(7) }
   return { content: text, thinking: null }
+}
+
+function relativeDate(iso) {
+  const d = new Date(iso + 'Z')
+  const diff = Date.now() - d.getTime()
+  const m = Math.floor(diff / 60000)
+  const h = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  if (h < 24) return `${h}h ago`
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days}d ago`
+  return d.toLocaleDateString()
 }
 
 function ThinkingBlock({ content, streamingPhase }) {
@@ -26,9 +38,8 @@ function ThinkingBlock({ content, streamingPhase }) {
   }, [streamingPhase])
 
   useEffect(() => {
-    if (open && streamingPhase && contentRef.current) {
+    if (open && streamingPhase && contentRef.current)
       contentRef.current.scrollTop = contentRef.current.scrollHeight
-    }
   }, [content, open, streamingPhase])
 
   return (
@@ -56,9 +67,7 @@ function Message({ msg }) {
     <div className={`message ${isUser ? 'user' : 'cosmos'}`}>
       {!isUser && <div className="avatar">◈</div>}
       <div className="bubble-wrap">
-        {hasThinking && (
-          <ThinkingBlock content={msg.thinking} streamingPhase={inThinkingPhase} />
-        )}
+        {hasThinking && <ThinkingBlock content={msg.thinking} streamingPhase={inThinkingPhase} />}
         {!inThinkingPhase && (
           <div className="bubble">
             {msg.content}
@@ -71,16 +80,86 @@ function Message({ msg }) {
   )
 }
 
+function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }) {
+  return (
+    <aside className="sidebar">
+      <div className="session-list">
+        {sessions.length === 0 && (
+          <div className="session-empty">No previous chats yet.</div>
+        )}
+        {sessions.map(s => (
+          <div
+            key={s.id}
+            className={`session-item${s.id === currentId ? ' active' : ''}`}
+            onClick={() => onSelect(s.id)}
+          >
+            <div className="session-title">{s.title}</div>
+            <div className="session-meta">{relativeDate(s.updated_at)}</div>
+            <button
+              className="session-delete"
+              onClick={e => { e.stopPropagation(); onDelete(s.id) }}
+              title="Delete"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="sidebar-header">
+        <button className="new-chat-btn" onClick={onNew}>
+          <span>+</span> New chat
+        </button>
+      </div>
+    </aside>
+  )
+}
+
 export default function App() {
+  const [sessionId, setSessionId] = useState(newSessionId)
+  const [sessions, setSessions] = useState([])
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/sessions')
+      setSessions(await res.json())
+    } catch {}
+  }, [])
+
+  useEffect(() => { fetchSessions() }, [fetchSessions])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  async function selectSession(id) {
+    try {
+      const res = await fetch(`/sessions/${id}/history`)
+      const data = await res.json()
+      setSessionId(id)
+      setMessages(data.history.map(m => ({
+        role: m.role,
+        content: m.content,
+        thinking: m.thinking || null,
+      })))
+    } catch {}
+  }
+
+  function newChat() {
+    setSessionId(newSessionId())
+    setMessages([])
+    inputRef.current?.focus()
+  }
+
+  async function deleteSession(id) {
+    await fetch(`/sessions/${id}`, { method: 'DELETE' })
+    if (id === sessionId) newChat()
+    fetchSessions()
+  }
 
   async function send() {
     const text = input.trim()
@@ -98,7 +177,7 @@ export default function App() {
       const res = await fetch('/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: SESSION_ID }),
+        body: JSON.stringify({ message: text, session_id: sessionId }),
       })
 
       const reader = res.body.getReader()
@@ -114,18 +193,14 @@ export default function App() {
         buf = lines.pop() ?? ''
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
-          const payload = line.slice(6)
           try {
-            const evt = JSON.parse(payload)
+            const evt = JSON.parse(line.slice(6))
             if (evt.error) throw new Error(evt.error)
             if (evt.done) break outer
             if (evt.delta) {
               accumulated += evt.delta
               const parsed = parseStream(accumulated)
-              setMessages(m => [
-                ...m.slice(0, -1),
-                { role: 'assistant', ...parsed, streaming: true },
-              ])
+              setMessages(m => [...m.slice(0, -1), { role: 'assistant', ...parsed, streaming: true }])
             }
           } catch { break outer }
         }
@@ -139,58 +214,64 @@ export default function App() {
       setLoading(false)
       setMessages(m => {
         const last = m[m.length - 1]
-        if (last?.role === 'assistant') {
-          return [...m.slice(0, -1), { ...last, streaming: false }]
-        }
-        return m
+        return last?.role === 'assistant'
+          ? [...m.slice(0, -1), { ...last, streaming: false }]
+          : m
       })
+      fetchSessions()
       inputRef.current?.focus()
     }
   }
 
   function onKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-title">
-          <span className="cosmos-dot" />
-          Cosmos
-        </div>
-        <div className="header-sub">local · private · yours</div>
-      </header>
-
-      <main className="messages">
-        {messages.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-glyph">◈</div>
-            <p>Ready when you are.</p>
+    <div className="layout">
+      <Sidebar
+        sessions={sessions}
+        currentId={sessionId}
+        onSelect={selectSession}
+        onNew={newChat}
+        onDelete={deleteSession}
+      />
+      <div className="app">
+        <header className="header">
+          <div className="header-title">
+            <span className="cosmos-dot" />
+            Cosmos
           </div>
-        )}
-        {messages.map((m, i) => <Message key={i} msg={m} />)}
-        <div ref={bottomRef} />
-      </main>
+          <div className="header-sub">local · private · yours</div>
+        </header>
 
-      <footer className="input-area">
-        <textarea
-          ref={inputRef}
-          className="input"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={onKey}
-          placeholder="Talk to Cosmos…"
-          rows={1}
-          disabled={loading}
-        />
-        <button className="send-btn" onClick={send} disabled={loading || !input.trim()}>
-          ↑
-        </button>
-      </footer>
+        <main className="messages">
+          {messages.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-glyph">◈</div>
+              <p>Ready when you are.</p>
+            </div>
+          )}
+          {messages.map((m, i) => <Message key={i} msg={m} />)}
+          <div ref={bottomRef} />
+        </main>
+
+        <footer className="input-area">
+          <textarea
+            ref={inputRef}
+            className="input"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Talk to Cosmos…"
+            rows={1}
+            disabled={loading}
+          />
+          <button className="send-btn" onClick={send} disabled={loading || !input.trim()}>
+            ↑
+          </button>
+        </footer>
+      </div>
     </div>
   )
 }

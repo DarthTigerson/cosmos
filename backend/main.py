@@ -8,10 +8,12 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
 
 from chat import router as chat_router
 from memory import init_memory
+from sessions_db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
     await init_memory()
     yield
 
