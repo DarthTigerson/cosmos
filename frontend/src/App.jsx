@@ -107,14 +107,39 @@ function ClockWidget() {
   )
 }
 
+function fmtTime(unixSec) {
+  if (!unixSec) return null
+  const d = new Date(unixSec * 1000)
+  const now = new Date()
+  const isToday = d.toDateString() === now.toDateString()
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1)
+  const isTomorrow = d.toDateString() === tomorrow.toDateString()
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (isToday) return time
+  if (isTomorrow) return `tomorrow ${time}`
+  return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+}
+
+function fmtTracked(seconds) {
+  if (!seconds || seconds < 60) return `${seconds || 0}s`
+  const m = Math.round(seconds / 60)
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60), rem = m % 60
+  return rem ? `${h}h ${rem}m` : `${h}h`
+}
+
 function BatteryWidget({ battery }) {
   if (!battery) return null
-  const { level, charging } = battery
+  const { level, charging, time_remaining, stats } = battery
   const fillColor = level > 40 ? 'var(--battery-ok)' : level > 20 ? 'var(--battery-warn)' : 'var(--battery-low)'
   const fillW = Math.max(1, Math.round((level / 100) * 13))
-  const label = charging ? `${level}% · charging` : `${level}%${battery.time_remaining ? ' · ' + battery.time_remaining : ''}`
+
+  const hasStats = stats?.rate_pct_per_hour != null
+  const rate = stats?.rate_pct_per_hour
+  const draining = rate != null && rate < 0
+
   return (
-    <div className="battery-widget" title={label}>
+    <div className="battery-widget">
       <svg width="22" height="12" viewBox="0 0 22 12" aria-hidden="true">
         <rect x="0.5" y="0.5" width="18" height="11" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.1"/>
         <rect x="19.2" y="3.5" width="2.3" height="5" rx="1" fill="currentColor"/>
@@ -124,6 +149,57 @@ function BatteryWidget({ battery }) {
         )}
       </svg>
       <span className="battery-pct">{level}%</span>
+
+      <div className="battery-popover">
+        <div className="bpop-title">
+          {level}% · {charging ? 'Charging' : 'On battery'}
+        </div>
+        <div className="bpop-divider"/>
+        {hasStats ? (
+          <>
+            <div className="bpop-row">
+              <span className="bpop-label">Drain rate</span>
+              <span className="bpop-val">{draining ? `${Math.abs(rate)}% / hr` : `+${rate}% / hr`}</span>
+            </div>
+            {time_remaining && (
+              <div className="bpop-row">
+                <span className="bpop-label">pmset estimate</span>
+                <span className="bpop-val">{time_remaining}</span>
+              </div>
+            )}
+            {draining && stats.predicted_empty && (
+              <div className="bpop-row">
+                <span className="bpop-label">Predicted empty</span>
+                <span className="bpop-val">{fmtTime(stats.predicted_empty)}</span>
+              </div>
+            )}
+            {!draining && stats.predicted_full && (
+              <div className="bpop-row">
+                <span className="bpop-label">Predicted full</span>
+                <span className="bpop-val">{fmtTime(stats.predicted_full)}</span>
+              </div>
+            )}
+            <div className="bpop-divider"/>
+            <div className="bpop-footer">
+              {stats.observations} readings · {fmtTracked(stats.tracked_seconds)}
+            </div>
+          </>
+        ) : (
+          <>
+            {time_remaining && (
+              <div className="bpop-row">
+                <span className="bpop-label">Time left</span>
+                <span className="bpop-val">{time_remaining}</span>
+              </div>
+            )}
+            <div className="bpop-footer">
+              {stats?.observations < 2
+                ? 'Building history…'
+                : `Tracking · ${fmtTracked(stats?.tracked_seconds)}`}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

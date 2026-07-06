@@ -1,6 +1,102 @@
+import json
+import os
 import re
 import subprocess
+import time
 
+READINGS_FILE = os.getenv("BATTERY_READINGS_FILE", "./data/battery_readings.json")
+MAX_READINGS = 120   # ~1 hour at 30s poll interval
+MIN_TRACKING_SECONDS = 120  # need 2 min before showing a rate
+
+
+# ── Battery readings history ──────────────────────────────────────────────────
+
+_readings: list[dict] = []  # [{ts: float, level: int, charging: bool}]
+
+
+def _load_readings():
+    global _readings
+    try:
+        if os.path.exists(READINGS_FILE):
+            with open(READINGS_FILE) as f:
+                _readings = json.load(f)
+            _readings = _readings[-MAX_READINGS:]
+    except Exception:
+        _readings = []
+
+
+def _save_readings():
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(READINGS_FILE)), exist_ok=True)
+        with open(READINGS_FILE, "w") as f:
+            json.dump(_readings[-MAX_READINGS:], f)
+    except Exception:
+        pass
+
+
+def record_battery_reading(level: int, charging: bool):
+    now = time.time()
+    # Deduplicate: skip if last reading was < 20s ago with same level
+    if _readings:
+        last = _readings[-1]
+        if now - last["ts"] < 20 and last["level"] == level and last["charging"] == charging:
+            return
+    _readings.append({"ts": now, "level": level, "charging": charging})
+    if len(_readings) > MAX_READINGS:
+        _readings.pop(0)
+    _save_readings()
+
+
+def get_drain_stats() -> dict:
+    """Calculate drain rate and predictions from recorded readings."""
+    if not _readings:
+        return _empty_stats(0)
+
+    # Use only readings matching the current charging state
+    current_charging = _readings[-1]["charging"]
+    consistent = [r for r in _readings if r["charging"] == current_charging]
+
+    if len(consistent) < 2:
+        return _empty_stats(len(consistent))
+
+    first, last = consistent[0], consistent[-1]
+    elapsed_sec = last["ts"] - first["ts"]
+
+    if elapsed_sec < MIN_TRACKING_SECONDS:
+        return _empty_stats(len(consistent), elapsed_sec)
+
+    elapsed_hours = elapsed_sec / 3600
+    level_change = last["level"] - first["level"]   # negative = draining
+    rate_per_hour = level_change / elapsed_hours     # negative = draining
+
+    predicted_empty = predicted_full = None
+    if rate_per_hour < -0.1:   # draining meaningfully
+        hours_left = last["level"] / abs(rate_per_hour)
+        predicted_empty = last["ts"] + hours_left * 3600
+    elif rate_per_hour > 0.1:  # charging meaningfully
+        hours_to_full = (100 - last["level"]) / rate_per_hour
+        predicted_full = last["ts"] + hours_to_full * 3600
+
+    return {
+        "rate_pct_per_hour": round(rate_per_hour, 1),
+        "predicted_empty": predicted_empty,
+        "predicted_full": predicted_full,
+        "observations": len(consistent),
+        "tracked_seconds": round(elapsed_sec),
+    }
+
+
+def _empty_stats(observations: int, tracked_seconds: float = 0) -> dict:
+    return {
+        "rate_pct_per_hour": None,
+        "predicted_empty": None,
+        "predicted_full": None,
+        "observations": observations,
+        "tracked_seconds": round(tracked_seconds),
+    }
+
+
+# ── Battery current ────────────────────────────────────────────────────────────
 
 def get_battery() -> dict | None:
     """Return battery status from pmset. Returns None if not available."""
@@ -17,7 +113,7 @@ def get_battery() -> dict | None:
         return None
 
     level = int(m.group(1))
-    charging = "AC Power" in out  # covers "charging" and "charged" states
+    charging = "AC Power" in out
     discharging = "discharging" in out
 
     time_remaining = None
@@ -25,27 +121,29 @@ def get_battery() -> dict | None:
     if tm:
         time_remaining = tm.group(1)
 
+    record_battery_reading(level, charging)
+    stats = get_drain_stats()
+
     return {
         "level": level,
         "charging": charging,
         "discharging": discharging,
         "time_remaining": time_remaining,
+        "stats": stats,
     }
 
+
+# ── Network ────────────────────────────────────────────────────────────────────
 
 def get_network() -> dict:
     """Return WiFi connectivity status on macOS."""
     try:
-        # scutil --nwi lists active interfaces with reachability flags
         nwi = subprocess.run(
             ["scutil", "--nwi"],
             capture_output=True, text=True, timeout=3
         ).stdout
-
-        # en0 is listed in "Network interfaces:" and has a Reachable reach line
         wifi_connected = "en0" in nwi and "(Reachable)" in nwi
 
-        # Try to get SSID (may be redacted on macOS 15+ due to privacy changes)
         ssid = None
         try:
             ns_out = subprocess.run(

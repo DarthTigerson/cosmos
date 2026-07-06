@@ -23,7 +23,7 @@ import podcasts_db
 import questions_db
 import follow_ups_db
 import consolidation
-from system_info import get_battery, get_network
+from system_info import get_battery, get_network, _load_readings
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
     podcasts_db.init_db()
     questions_db.init_db()
     follow_ups_db.init_db()
+    _load_readings()
     await init_memory()
     import asyncio
     asyncio.get_event_loop().create_task(consolidation.consolidation_loop())
