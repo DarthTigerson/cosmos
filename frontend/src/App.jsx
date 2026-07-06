@@ -81,11 +81,12 @@ function ToolBlock({ calls }) {
   )
 }
 
-function Message({ msg }) {
+function Message({ msg, isLast, onRegenerate, loading }) {
   const isUser = msg.role === 'user'
   const hasThinking = msg.thinking != null && msg.thinking.length > 0
   const streamingThinking = !!msg.streamingThinking
   const hasTools = msg.toolCalls && msg.toolCalls.length > 0
+  const showRegenerate = !isUser && isLast && !loading && !msg.streaming
 
   return (
     <div className={`message ${isUser ? 'user' : 'cosmos'}`}>
@@ -98,6 +99,11 @@ function Message({ msg }) {
             <Markdown>{msg.content?.trimStart()}</Markdown>
             {msg.streaming && <span className="cursor-inline" />}
           </div>
+        )}
+        {showRegenerate && (
+          <button className="regenerate-btn" onClick={onRegenerate} title="Regenerate response">
+            ↺ Regenerate
+          </button>
         )}
       </div>
       {isUser && <div className="avatar user-avatar">T</div>}
@@ -222,18 +228,17 @@ export default function App() {
     fetchSessions()
   }
 
-  async function send() {
-    const text = input.trim()
+  async function send(overrideText) {
+    const text = (overrideText ?? input).trim()
     if (!text || loading) return
 
     abortRef.current = new AbortController()
 
     setMessages(m => [
-      ...m,
-      { role: 'user', content: text },
-      { role: 'assistant', content: '', thinking: null, streaming: true },
+      ...(overrideText ? m : [...m, { role: 'user', content: text }]),
+      { role: 'assistant', content: '', thinking: null, toolCalls: [], streaming: true },
     ])
-    setInput('')
+    if (!overrideText) setInput('')
     setLoading(true)
 
     try {
@@ -326,6 +331,15 @@ export default function App() {
     }
   }
 
+  async function regenerate() {
+    // Find the last user message
+    const lastUser = [...messages].reverse().find(m => m.role === 'user')
+    if (!lastUser) return
+    // Drop the last assistant message and re-send
+    setMessages(m => m.slice(0, -1))
+    await send(lastUser.content)
+  }
+
   function onKey(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
@@ -362,7 +376,15 @@ export default function App() {
                   <p>Ready when you are.</p>
                 </div>
               )}
-              {messages.map((m, i) => <Message key={i} msg={m} />)}
+              {messages.map((m, i) => (
+            <Message
+              key={i}
+              msg={m}
+              isLast={i === messages.length - 1}
+              onRegenerate={regenerate}
+              loading={loading}
+            />
+          ))}
               <div ref={bottomRef} />
             </main>
 
