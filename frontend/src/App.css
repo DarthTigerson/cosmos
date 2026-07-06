@@ -211,19 +211,20 @@ body {
   color: var(--cosmos-accent);
 }
 
-.cosmos-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--cosmos-accent);
-  box-shadow: 0 0 10px var(--cosmos-accent);
+.header-avatar {
+  width: 28px;
+  height: 28px;
+  margin-top: 0;
   animation: pulse 3s ease-in-out infinite;
-  flex-shrink: 0;
+}
+
+.header-avatar.spinning {
+  animation: spin-slow 3s linear infinite;
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 10px var(--cosmos-accent); }
-  50%       { opacity: 0.45; box-shadow: 0 0 4px var(--cosmos-accent); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--cosmos-accent); }
+  50%       { opacity: 0.5; box-shadow: none; }
 }
 
 .header-sub {

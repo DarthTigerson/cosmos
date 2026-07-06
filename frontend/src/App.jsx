@@ -261,7 +261,7 @@ export default function App() {
       <div className="app">
         <header className="header">
           <div className="header-title">
-            <span className="cosmos-dot" />
+            <span className={`avatar header-avatar${loading ? ' spinning' : ''}`}>◈</span>
             Cosmos
           </div>
           <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
