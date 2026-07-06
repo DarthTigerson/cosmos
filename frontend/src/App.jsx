@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import Markdown from 'react-markdown'
 import './App.css'
 
 function newSessionId() {
@@ -60,7 +61,7 @@ function Message({ msg }) {
         {hasThinking && <ThinkingBlock content={msg.thinking} streamingPhase={streamingThinking} />}
         {!streamingThinking && (
           <div className="bubble">
-            {msg.content}
+            <Markdown>{msg.content?.trimStart()}</Markdown>
             {msg.streaming && <span className="cursor-inline" />}
           </div>
         )}

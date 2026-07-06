@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "Starting Cosmos backend..."
 cd "$SCRIPT_DIR/backend"
 source /Users/thomas/.local/bin/env
-uv run uvicorn main:app --host 0.0.0.0 --port 8001 --reload &
+uv run uvicorn main:app --host 0.0.0.0 --port 8002 --reload &
 BACKEND_PID=$!
 
 echo "Starting Cosmos frontend..."
