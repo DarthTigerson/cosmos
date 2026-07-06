@@ -18,6 +18,7 @@
   --cosmos-accent-dim: #2b1608;
   --user-accent: #6899c4;
   --user-accent-dim: #0c1e30;
+  --user-accent-border: rgba(104, 153, 196, 0.3);
   --thinking: #9a7450;
   --thinking-bg: #120e0a;
   --radius: 18px;
@@ -311,7 +312,7 @@ body {
 .user-avatar {
   background: var(--user-accent-dim);
   color: var(--user-accent);
-  border-color: rgba(104, 153, 196, 0.3);
+  border-color: var(--user-accent-border);
   font-size: 12px;
 }
 
@@ -385,9 +386,9 @@ body {
 
 .message.user .bubble {
   background: var(--user-accent-dim);
-  border: 1px solid rgba(104, 153, 196, 0.25);
+  border: 1px solid var(--user-accent-border);
   border-left: none;
-  border-right: 2px solid rgba(104, 153, 196, 0.35);
+  border-right: 2px solid var(--user-accent-border);
   border-radius: var(--radius) var(--radius) var(--radius-sm) var(--radius);
 }
 

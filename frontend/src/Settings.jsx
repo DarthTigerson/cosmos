@@ -52,11 +52,11 @@ const THEMES = [
   {
     label: 'Solar',
     vars: {
-      '--bg': '#0c0b00', '--bg-surface': '#141200', '--bg-input': '#1c1a00',
-      '--border': '#2e2a00', '--text': '#f5edbb', '--text-dim': '#7a6e30',
-      '--cosmos-accent': '#f5c800', '--cosmos-accent-glow': 'rgba(245,200,0,0.15)',
-      '--cosmos-accent-dim': '#1e1a00', '--user-accent': '#70b8e0',
-      '--user-accent-dim': '#091824', '--thinking': '#c8a800', '--thinking-bg': '#100f00',
+      '--bg': '#0b0b0a', '--bg-surface': '#131310', '--bg-input': '#1a1a16',
+      '--border': '#2a2a20', '--text': '#f5eec0', '--text-dim': '#7a7240',
+      '--cosmos-accent': '#ffe033', '--cosmos-accent-glow': 'rgba(255,224,51,0.18)',
+      '--cosmos-accent-dim': '#1f1900', '--user-accent': '#e8a030',
+      '--user-accent-dim': '#1f1000', '--thinking': '#c8960a', '--thinking-bg': '#0e0c00',
     },
   },
 ]
@@ -82,6 +82,10 @@ export function applySettings(s) {
   const root = document.documentElement.style
   const theme = THEMES.find(t => t.label === s.theme) || THEMES[0]
   Object.entries(theme.vars).forEach(([k, v]) => root.setProperty(k, v))
+  // derive user bubble border from user-accent hex
+  const ua = theme.vars['--user-accent'] || '#6899c4'
+  const r = parseInt(ua.slice(1,3),16), g = parseInt(ua.slice(3,5),16), b = parseInt(ua.slice(5,7),16)
+  root.setProperty('--user-accent-border', `rgba(${r},${g},${b},0.35)`)
   root.setProperty('--font-ui', s.font)
   root.setProperty('--font-size-base', `${s.fontSize}px`)
   root.setProperty('--line-height-base', s.lineHeight)
