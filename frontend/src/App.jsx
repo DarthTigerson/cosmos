@@ -54,6 +54,27 @@ function useBattery() {
   return battery
 }
 
+function useClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return now
+}
+
+function ClockWidget() {
+  const now = useClock()
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const date = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+  return (
+    <div className="clock-widget">
+      <span className="clock-time">{time}</span>
+      <span className="clock-date">{date}</span>
+    </div>
+  )
+}
+
 function BatteryWidget({ battery }) {
   if (!battery) return null
   const { level, charging } = battery
@@ -499,6 +520,7 @@ export default function App() {
               <IconSettings />
             </button>
             <BatteryWidget battery={battery} />
+            <ClockWidget />
           </div>
         </header>
         {showSettings && <Settings onClose={() => setShowSettings(false)} />}
