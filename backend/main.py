@@ -1,19 +1,34 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
 
+from db import migrate_legacy
 from chat import router as chat_router
+from apps.podcasts import router as podcasts_router
+from apps.questions import router as questions_router
 from memory import init_memory
 from sessions_db import init_db
+import podcasts_db
+import questions_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    migrate_legacy()       # move podcasts.db / questions.db → cosmos.db if they exist
     init_db()
+    podcasts_db.init_db()
+    questions_db.init_db()
     await init_memory()
     yield
 
@@ -28,6 +43,8 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(podcasts_router)
+app.include_router(questions_router)
 
 
 @app.get("/health")

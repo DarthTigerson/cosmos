@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import Settings, { initSettings } from './Settings.jsx'
 import PluginsPage, { getEnabledPluginIds } from './Plugins.jsx'
+import PodcastApp from './PodcastApp.jsx'
+import QuestionsApp from './QuestionsApp.jsx'
 import './App.css'
 
 function newSessionId() {
@@ -116,7 +118,7 @@ function Message({ msg, isLast, onRegenerate, loading }) {
   )
 }
 
-function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange }) {
+function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions }) {
   return (
     <aside className="sidebar">
       <div
@@ -125,6 +127,16 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
       >
         <span className="sidebar-nav-icon">⬡</span>
         Plugins
+      </div>
+      <div
+        className={`sidebar-nav-item${view === 'apps' || view === 'podcasts' || view === 'questions' ? ' active' : ''}`}
+        onClick={() => onViewChange(view === 'apps' || view === 'podcasts' || view === 'questions' ? 'chat' : 'apps')}
+      >
+        <span className="sidebar-nav-icon">⊞</span>
+        Apps
+        {pendingQuestions > 0 && (
+          <span className="sidebar-badge">{pendingQuestions}</span>
+        )}
       </div>
       <div className="sidebar-divider" />
       <div className="session-list">
@@ -158,6 +170,31 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
   )
 }
 
+const APPS_REGISTRY = [
+  { id: 'podcasts', icon: '📻', name: 'Podcasts', description: 'Track episodes and ingest transcripts for Cosmos to learn from.' },
+  { id: 'questions', icon: '❓', name: 'Questions', description: 'Questions Cosmos has parked for you to answer and resolve into memory.' },
+]
+
+function AppsPage({ onOpen }) {
+  return (
+    <div className="apps-page">
+      <div className="apps-page-header">
+        <span className="apps-page-icon">⊞</span>
+        <h2>Apps</h2>
+      </div>
+      <div className="apps-grid">
+        {APPS_REGISTRY.map(app => (
+          <div key={app.id} className="app-card" onClick={() => onOpen(app.id)}>
+            <span className="app-card-icon">{app.icon}</span>
+            <div className="app-card-name">{app.name}</div>
+            <div className="app-card-desc">{app.description}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState(newSessionId)
   const [sessions, setSessions] = useState([])
@@ -167,6 +204,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [view, setView] = useState('chat')
   const [connected, setConnected] = useState(false)
+  const [pendingQuestions, setPendingQuestions] = useState(0)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -193,6 +231,20 @@ export default function App() {
       setSessions(await res.json())
     } catch {}
   }, [])
+
+  const fetchPendingQuestions = useCallback(async () => {
+    try {
+      const res = await fetch('/questions/count')
+      const data = await res.json()
+      setPendingQuestions(data.pending || 0)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    fetchPendingQuestions()
+    const id = setInterval(fetchPendingQuestions, 15000)
+    return () => clearInterval(id)
+  }, [fetchPendingQuestions])
 
   useEffect(() => { fetchSessions() }, [fetchSessions])
 
@@ -359,6 +411,7 @@ export default function App() {
         onDelete={deleteSession}
         view={view}
         onViewChange={setView}
+        pendingQuestions={pendingQuestions}
       />
       <div className="app">
         <header className="header">
@@ -372,6 +425,12 @@ export default function App() {
 
         {view === 'plugins' ? (
           <PluginsPage />
+        ) : view === 'apps' ? (
+          <AppsPage onOpen={setView} />
+        ) : view === 'podcasts' ? (
+          <PodcastApp onBack={() => setView('apps')} />
+        ) : view === 'questions' ? (
+          <QuestionsApp onBack={() => setView('apps')} />
         ) : (
           <>
             <main className="messages">

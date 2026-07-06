@@ -58,10 +58,33 @@ async def _build_system(query: str, tools: list[dict]) -> str:
     memories = await retrieve_memories(query, n_results=MAX_MEMORY_RESULTS)
     tool_prompt = _build_tool_prompt(tools)
     base = character_context + tool_prompt
+
     if not memories:
         return base
-    memory_block = "\n".join(f"- {m['content']}" for m in memories)
-    return f"{base}\n\nRelevant memories:\n{memory_block}"
+
+    personal = [m for m in memories if m.get("collection") != "knowledge"]
+    knowledge = [m for m in memories if m.get("collection") == "knowledge"]
+
+    sections = []
+    if personal:
+        lines = "\n".join(f"- {m['content']}" for m in personal)
+        sections.append(f"Relevant memories:\n{lines}")
+    if knowledge:
+        lines = []
+        for m in knowledge:
+            meta = m.get("metadata", {})
+            source = meta.get("show", "Podcast")
+            episode = meta.get("episode", "")
+            pub = meta.get("pub_date", "")[:10]
+            label = f"{source}"
+            if episode:
+                label += f" — {episode}"
+            if pub:
+                label += f" ({pub})"
+            lines.append(f"- [{label}] {m['content']}")
+        sections.append(f"Relevant knowledge from ingested content:\n" + "\n".join(lines))
+
+    return base + "\n\n" + "\n\n".join(sections)
 
 
 def _load_session_from_db(session_id: str) -> list[dict]:

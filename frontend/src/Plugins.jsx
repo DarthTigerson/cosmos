@@ -17,6 +17,14 @@ export const PLUGIN_REGISTRY = [
     tags: ['wikipedia', 'search', 'knowledge'],
     status: 'active',
   },
+  {
+    id: 'ask_thomas',
+    name: 'Ask Thomas',
+    icon: '❓',
+    description: 'Let Cosmos park questions for you when she\'s uncertain — with source context and her thinking — so you can answer and resolve them into verified memory.',
+    tags: ['questions', 'memory', 'learning'],
+    status: 'active',
+  },
 ]
 
 const STORAGE_KEY = 'cosmos-plugins'

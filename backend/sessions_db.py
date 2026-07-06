@@ -1,16 +1,6 @@
-import os
 import sqlite3
 from datetime import datetime
-from pathlib import Path
-
-DB_PATH = os.getenv("SESSIONS_DB_PATH", "./data/sessions.db")
-
-
-def _conn():
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+from db import DB_PATH, conn as _conn
 
 
 def init_db():
