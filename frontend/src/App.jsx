@@ -100,12 +100,10 @@ function Message({ msg, isLast, onRegenerate, loading }) {
             {msg.streaming && <span className="cursor-inline" />}
           </div>
         )}
-        {showRegenerate && (
-          <button className="regenerate-btn" onClick={onRegenerate} title="Regenerate response">
-            ↺ Regenerate
-          </button>
-        )}
       </div>
+      {showRegenerate && (
+        <button className="regenerate-btn" onClick={onRegenerate} title="Regenerate response">↺</button>
+      )}
       {isUser && <div className="avatar user-avatar">T</div>}
     </div>
   )
