@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Markdown from 'react-markdown'
+import Settings, { initSettings } from './Settings.jsx'
 import './App.css'
 
 function newSessionId() {
@@ -111,8 +112,11 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+
+  useEffect(() => { initSettings() }, [])
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -244,7 +248,9 @@ export default function App() {
             Cosmos
           </div>
           <div className="header-sub">local · private · yours</div>
+          <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
         </header>
+        {showSettings && <Settings onClose={() => setShowSettings(false)} />}
 
         <main className="messages">
           {messages.length === 0 && (
