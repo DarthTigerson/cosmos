@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 
 const FONTS = [
+  { label: 'Ubuntu', value: '"Ubuntu", system-ui, sans-serif' },
   { label: 'System', value: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif' },
   { label: 'Inter',  value: '"Inter", system-ui, sans-serif' },
   { label: 'Georgia', value: 'Georgia, "Times New Roman", serif' },
@@ -48,11 +49,21 @@ const THEMES = [
       '--user-accent-dim': '#dceaf5', '--thinking': '#9a7a5a', '--thinking-bg': '#ede8e2',
     },
   },
+  {
+    label: 'Solar',
+    vars: {
+      '--bg': '#0c0b00', '--bg-surface': '#141200', '--bg-input': '#1c1a00',
+      '--border': '#2e2a00', '--text': '#f5edbb', '--text-dim': '#7a6e30',
+      '--cosmos-accent': '#f5c800', '--cosmos-accent-glow': 'rgba(245,200,0,0.15)',
+      '--cosmos-accent-dim': '#1e1a00', '--user-accent': '#70b8e0',
+      '--user-accent-dim': '#091824', '--thinking': '#c8a800', '--thinking-bg': '#100f00',
+    },
+  },
 ]
 
 const DEFAULTS = {
   theme: 'Ember',
-  font: FONTS[0].value,
+  font: '"Ubuntu", system-ui, sans-serif',
   fontSize: 15,
   lineHeight: 1.65,
   bubbleWidth: 680,
