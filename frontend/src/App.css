@@ -293,6 +293,18 @@ body {
   line-height: 1;
 }
 
+.wifi-widget {
+  display: flex;
+  align-items: center;
+  color: var(--battery-ok);
+  cursor: default;
+  user-select: none;
+}
+.wifi-widget--off {
+  color: var(--text-dim);
+  opacity: 0.45;
+}
+
 .battery-widget {
   display: flex;
   align-items: center;

@@ -36,6 +36,38 @@ function IconStop() {
   )
 }
 
+function useNetwork() {
+  const [net, setNet] = useState(null)
+  useEffect(() => {
+    async function fetch_() {
+      try {
+        const res = await fetch('/network')
+        setNet(await res.json())
+      } catch { setNet(null) }
+    }
+    fetch_()
+    const id = setInterval(fetch_, 30000)
+    return () => clearInterval(id)
+  }, [])
+  return net
+}
+
+function WifiWidget({ net }) {
+  if (!net) return null
+  const { wifi, ssid } = net
+  const label = wifi ? (ssid ? `Wi-Fi · ${ssid}` : 'Wi-Fi · connected') : 'Wi-Fi · not connected'
+  return (
+    <div className={`wifi-widget${wifi ? '' : ' wifi-widget--off'}`} title={label}>
+      <svg width="18" height="14" viewBox="0 0 24 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M1.42 8a16 16 0 0 1 21.16 0"/>
+        <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+        <circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/>
+      </svg>
+    </div>
+  )
+}
+
 function useBattery() {
   const [battery, setBattery] = useState(null)
   useEffect(() => {
@@ -292,6 +324,7 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const [pendingQuestions, setPendingQuestions] = useState(0)
   const battery = useBattery()
+  const net = useNetwork()
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -519,6 +552,7 @@ export default function App() {
             <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">
               <IconSettings />
             </button>
+            <WifiWidget net={net} />
             <BatteryWidget battery={battery} />
             <ClockWidget />
           </div>

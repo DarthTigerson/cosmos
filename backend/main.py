@@ -23,7 +23,7 @@ import podcasts_db
 import questions_db
 import follow_ups_db
 import consolidation
-from system_info import get_battery
+from system_info import get_battery, get_network
 
 
 @asynccontextmanager
@@ -61,3 +61,8 @@ async def health():
 @app.get("/battery")
 async def battery():
     return get_battery() or {"level": None, "charging": None, "discharging": None, "time_remaining": None}
+
+
+@app.get("/network")
+async def network():
+    return get_network()

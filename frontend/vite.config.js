@@ -18,7 +18,7 @@ export default defineConfig({
         },
       },
       // Everything else that isn't a static asset goes to the backend
-      '^/(chat|sessions|podcasts|episodes|questions|health|memory|battery)': {
+      '^/(chat|sessions|podcasts|episodes|questions|health|memory|battery|network)': {
         target: 'http://localhost:8002',
         changeOrigin: true,
       },
