@@ -247,7 +247,6 @@ export default function App() {
             <span className="cosmos-dot" />
             Cosmos
           </div>
-          <div className="header-sub">local · private · yours</div>
           <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
         </header>
         {showSettings && <Settings onClose={() => setShowSettings(false)} />}
