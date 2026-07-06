@@ -113,11 +113,26 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [connected, setConnected] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
 
   useEffect(() => { initSettings() }, [])
+
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const res = await fetch('/health', { signal: AbortSignal.timeout(2500) })
+        setConnected(res.ok)
+      } catch {
+        setConnected(false)
+      }
+    }
+    checkHealth()
+    const id = setInterval(checkHealth, 5000)
+    return () => clearInterval(id)
+  }, [])
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -261,7 +276,7 @@ export default function App() {
       <div className="app">
         <header className="header">
           <div className="header-title">
-            <span className={`avatar header-avatar${loading ? ' spinning' : ''}`}>◈</span>
+            <span className={`cosmos-glyph${loading ? ' fast' : connected ? ' slow' : ' offline'}`}>◈</span>
             Cosmos
           </div>
           <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
@@ -271,7 +286,7 @@ export default function App() {
         <main className="messages">
           {messages.length === 0 && (
             <div className="empty-state">
-              <div className="empty-glyph">◈</div>
+              <div className={`cosmos-glyph empty-glyph${loading ? ' fast' : connected ? ' slow' : ' offline'}`}>◈</div>
               <p>Ready when you are.</p>
             </div>
           )}

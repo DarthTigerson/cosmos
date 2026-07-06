@@ -211,20 +211,31 @@ body {
   color: var(--cosmos-accent);
 }
 
-.header-avatar {
-  width: 28px;
-  height: 28px;
-  margin-top: 0;
-  animation: pulse 3s ease-in-out infinite;
+.header-title .cosmos-glyph {
+  font-size: 18px;
 }
 
-.header-avatar.spinning {
-  animation: spin-slow 3s linear infinite;
+.cosmos-glyph {
+  color: var(--cosmos-accent);
+  display: inline-block;
+  line-height: 1;
+  text-shadow:
+    0 0 6px var(--cosmos-accent),
+    0 0 14px var(--cosmos-accent);
+  transition: opacity 0.4s;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--cosmos-accent); }
-  50%       { opacity: 0.5; box-shadow: none; }
+.cosmos-glyph.slow {
+  animation: spin-slow 6s linear infinite;
+}
+
+.cosmos-glyph.fast {
+  animation: spin-slow 1.4s linear infinite;
+}
+
+.cosmos-glyph.offline {
+  opacity: 0.2;
+  text-shadow: none;
 }
 
 .header-sub {
@@ -278,9 +289,6 @@ body {
 
 .empty-glyph {
   font-size: 42px;
-  color: var(--cosmos-accent);
-  opacity: 0.25;
-  animation: pulse 4s ease-in-out infinite;
 }
 
 /* ── Message rows ── */
