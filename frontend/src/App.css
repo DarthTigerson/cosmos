@@ -378,6 +378,7 @@ body {
 
 .thinking-icon {
   font-size: 13px;
+  flex-shrink: 0;
   transition: transform 0.3s ease;
 }
 
@@ -388,6 +389,22 @@ body {
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+.thinking-label {
+  flex: 1;
+}
+
+.thinking-chevron {
+  font-size: 16px;
+  line-height: 1;
+  transform: rotate(0deg);
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.thinking-chevron.open {
+  transform: rotate(90deg);
 }
 
 .thinking-content {

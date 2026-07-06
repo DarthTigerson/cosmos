@@ -5,13 +5,6 @@ function newSessionId() {
   return 'cosmos-' + Math.random().toString(36).slice(2, 8)
 }
 
-function parseStream(text) {
-  const trimmed = text.trimStart()
-  const complete = trimmed.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/)
-  if (complete) return { content: complete[2].trimStart(), thinking: complete[1].trim() }
-  if (trimmed.startsWith('<think>')) return { content: '', thinking: trimmed.slice(7) }
-  return { content: text, thinking: null }
-}
 
 function relativeDate(iso) {
   const d = new Date(iso + 'Z')
@@ -28,25 +21,22 @@ function relativeDate(iso) {
 }
 
 function ThinkingBlock({ content, streamingPhase }) {
-  const [open, setOpen] = useState(true)
-  const prevPhase = useRef(streamingPhase)
+  const [open, setOpen] = useState(false)
   const contentRef = useRef(null)
 
   useEffect(() => {
-    if (prevPhase.current && !streamingPhase) setOpen(false)
-    prevPhase.current = streamingPhase
-  }, [streamingPhase])
-
-  useEffect(() => {
-    if (open && streamingPhase && contentRef.current)
+    if (open && contentRef.current)
       contentRef.current.scrollTop = contentRef.current.scrollHeight
-  }, [content, open, streamingPhase])
+  }, [content, open])
 
   return (
     <div className="thinking-block">
       <button className="thinking-toggle" onClick={() => setOpen(o => !o)}>
         <span className={`thinking-icon${streamingPhase ? ' spinning' : ''}`}>◈</span>
-        {streamingPhase ? 'Reasoning…' : open ? 'Hide reasoning' : 'Show reasoning'}
+        <span className="thinking-label">
+          {streamingPhase ? 'Thinking…' : 'Reasoning'}
+        </span>
+        <span className={`thinking-chevron${open ? ' open' : ''}`}>›</span>
       </button>
       {open && (
         <pre className="thinking-content" ref={contentRef}>
@@ -61,14 +51,14 @@ function ThinkingBlock({ content, streamingPhase }) {
 function Message({ msg }) {
   const isUser = msg.role === 'user'
   const hasThinking = msg.thinking != null && msg.thinking.length > 0
-  const inThinkingPhase = msg.streaming && hasThinking && !msg.content
+  const streamingThinking = !!msg.streamingThinking
 
   return (
     <div className={`message ${isUser ? 'user' : 'cosmos'}`}>
       {!isUser && <div className="avatar">◈</div>}
       <div className="bubble-wrap">
-        {hasThinking && <ThinkingBlock content={msg.thinking} streamingPhase={inThinkingPhase} />}
-        {!inThinkingPhase && (
+        {hasThinking && <ThinkingBlock content={msg.thinking} streamingPhase={streamingThinking} />}
+        {!streamingThinking && (
           <div className="bubble">
             {msg.content}
             {msg.streaming && <span className="cursor-inline" />}
@@ -183,7 +173,8 @@ export default function App() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
-      let accumulated = ''
+      let thinking = ''
+      let content = ''
 
       outer: while (true) {
         const { done, value } = await reader.read()
@@ -197,10 +188,19 @@ export default function App() {
             const evt = JSON.parse(line.slice(6))
             if (evt.error) throw new Error(evt.error)
             if (evt.done) break outer
+            if (evt.reasoning_delta) {
+              thinking += evt.reasoning_delta
+              setMessages(m => [...m.slice(0, -1), {
+                role: 'assistant', content, thinking, streaming: true, streamingThinking: true,
+              }])
+              await Promise.resolve()
+            }
             if (evt.delta) {
-              accumulated += evt.delta
-              const parsed = parseStream(accumulated)
-              setMessages(m => [...m.slice(0, -1), { role: 'assistant', ...parsed, streaming: true }])
+              content += evt.delta
+              setMessages(m => [...m.slice(0, -1), {
+                role: 'assistant', content, thinking: thinking || null, streaming: true, streamingThinking: false,
+              }])
+              await Promise.resolve()
             }
           } catch { break outer }
         }

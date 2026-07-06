@@ -1,6 +1,5 @@
 import json
 import os
-import re
 from collections import defaultdict
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -25,11 +24,12 @@ client = AsyncOpenAI(base_url=f"{VMLX_BASE_URL}/v1", api_key=VMLX_API_KEY)
 _sessions: dict[str, list[dict]] = defaultdict(list)
 
 
-def _extract_thinking(content: str) -> tuple[str, str | None]:
-    match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
-    if match:
-        return content[match.end():].strip(), match.group(1).strip()
-    return content.strip(), None
+def _get_reasoning(delta_or_message) -> str:
+    return (
+        getattr(delta_or_message, 'reasoning_content', None)
+        or (getattr(delta_or_message, 'model_extra', None) or {}).get('reasoning_content')
+        or ''
+    )
 
 
 async def _build_system(query: str) -> str:
@@ -72,7 +72,8 @@ async def chat_stream(req: ChatRequest):
     sessions_db.ensure_session(req.session_id, req.message)
 
     async def generate():
-        full_text = ""
+        full_content = ""
+        full_thinking = ""
         try:
             stream = await client.chat.completions.create(
                 model=VMLX_MODEL,
@@ -81,26 +82,28 @@ async def chat_stream(req: ChatRequest):
                 max_tokens=MAX_TOKENS,
             )
             async for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
-                if delta:
-                    full_text += delta
-                    yield f"data: {json.dumps({'delta': delta})}\n\n"
+                delta = chunk.choices[0].delta
+                reasoning = _get_reasoning(delta)
+                content = delta.content or ""
+                if reasoning:
+                    full_thinking += reasoning
+                    yield f"data: {json.dumps({'reasoning_delta': reasoning})}\n\n"
+                if content:
+                    full_content += content
+                    yield f"data: {json.dumps({'delta': content})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
 
-        answer, thinking = _extract_thinking(full_text)
-
-        # Persist to DB and update in-memory cache
         sessions_db.append_message(req.session_id, "user", req.message)
-        sessions_db.append_message(req.session_id, "assistant", answer, thinking)
+        sessions_db.append_message(req.session_id, "assistant", full_content, full_thinking or None)
         sessions_db.touch_session(req.session_id)
 
         history.append({"role": "user", "content": req.message})
-        history.append({"role": "assistant", "content": answer})
+        history.append({"role": "assistant", "content": full_content})
 
-        await maybe_store_exchange(req.message, answer)
-        await extract_and_store_traits(req.message, answer)
+        await maybe_store_exchange(req.message, full_content)
+        await extract_and_store_traits(req.message, full_content)
 
         yield f"data: {json.dumps({'done': True})}\n\n"
 
@@ -128,8 +131,9 @@ async def chat(req: ChatRequest):
         max_tokens=MAX_TOKENS,
     )
 
-    raw = response.choices[0].message.content
-    answer, thinking = _extract_thinking(raw)
+    msg = response.choices[0].message
+    answer = msg.content or ""
+    thinking = _get_reasoning(msg) or None
 
     sessions_db.append_message(req.session_id, "user", req.message)
     sessions_db.append_message(req.session_id, "assistant", answer, thinking)
