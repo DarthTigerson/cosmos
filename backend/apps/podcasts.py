@@ -368,6 +368,7 @@ async def fetch_transcript(episode_id: str):
                     break
 
                 elif event == "error":
+                    log.error(f"[fetch] download/transcribe error: {data}")
                     podcasts_db.update_episode_status(episode_id, "error")
                     yield _sse(status="error", message=data, pct=100)
                     break
