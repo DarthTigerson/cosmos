@@ -23,6 +23,7 @@ import podcasts_db
 import questions_db
 import follow_ups_db
 import consolidation
+from system_info import get_battery
 
 
 @asynccontextmanager
@@ -55,3 +56,8 @@ app.include_router(questions_router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "name": "Cosmos"}
+
+
+@app.get("/battery")
+async def battery():
+    return get_battery() or {"level": None, "charging": None, "discharging": None, "time_remaining": None}

@@ -27,6 +27,9 @@
   --font-size-base: 15px;
   --line-height-base: 1.65;
   --bubble-max-width: 680px;
+  --battery-ok: #6db87a;
+  --battery-warn: #e8a030;
+  --battery-low: #c0392b;
 }
 
 html, body, #root {
@@ -245,19 +248,42 @@ body {
   text-transform: lowercase;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
 .settings-btn {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 17px;
   cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 6px;
+  border-radius: 7px;
   transition: color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
-  margin-left: auto;
 }
 .settings-btn:hover { color: var(--cosmos-accent); background: var(--cosmos-accent-dim); }
+
+.battery-widget {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  cursor: default;
+  user-select: none;
+}
+.battery-pct {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  min-width: 26px;
+}
 
 .sidebar-nav-item {
   display: flex;
@@ -600,8 +626,6 @@ body {
   border: none;
   background: var(--cosmos-accent);
   color: #0d0b09;
-  font-size: 17px;
-  font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -626,7 +650,6 @@ body {
 .stop-btn {
   background: #c0392b;
   color: #fff;
-  font-size: 13px;
   box-shadow: 0 2px 12px rgba(192, 57, 43, 0.35);
 }
 .stop-btn:hover {

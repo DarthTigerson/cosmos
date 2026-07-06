@@ -14,6 +14,7 @@ import sessions_db
 import questions_db
 import follow_ups_db
 import consolidation
+from system_info import get_battery
 
 router = APIRouter()
 
@@ -59,10 +60,21 @@ def _build_tool_prompt(tools: list[dict]) -> str:
 
 async def _build_system(query: str, tools: list[dict]) -> str:
     now = _dt.now().strftime("%A, %B %-d %Y · %I:%M %p")
+    battery = get_battery()
+    if battery and battery["level"] is not None:
+        if battery["charging"]:
+            batt_str = f"charging at {battery['level']}%"
+        elif battery["time_remaining"]:
+            batt_str = f"{battery['level']}% battery ({battery['time_remaining']} remaining)"
+        else:
+            batt_str = f"{battery['level']}% battery"
+        context_line = f"Today is {now}. Thomas's machine is {batt_str}."
+    else:
+        context_line = f"Today is {now}."
     character_context = await get_character_context()
     memories = await retrieve_memories(query, n_results=MAX_MEMORY_RESULTS)
     tool_prompt = _build_tool_prompt(tools)
-    base = f"Today is {now}.\n\n" + character_context + tool_prompt
+    base = context_line + "\n\n" + character_context + tool_prompt
 
     if not memories:
         return base
