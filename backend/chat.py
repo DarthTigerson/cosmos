@@ -1,5 +1,6 @@
 import json
 import os
+import re as _re
 from collections import defaultdict
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -20,9 +21,11 @@ MAX_MEMORY_RESULTS = int(os.getenv("MAX_MEMORY_RESULTS", "5"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "3072"))
 MAX_TOOL_ITERATIONS = 5
 
+# Match both closed and unclosed tool call tags
+TOOL_CALL_RE = _re.compile(r'<tool_call>(.*?)(?:</tool_call>|$)', _re.DOTALL)
+
 client = AsyncOpenAI(base_url=f"{VMLX_BASE_URL}/v1", api_key=VMLX_API_KEY)
 
-# In-memory cache — DB is the source of truth
 _sessions: dict[str, list[dict]] = defaultdict(list)
 
 
@@ -34,13 +37,31 @@ def _get_reasoning(delta_or_message) -> str:
     )
 
 
-async def _build_system(query: str) -> str:
+def _build_tool_prompt(tools: list[dict]) -> str:
+    if not tools:
+        return ""
+    lines = [
+        "\n\nYou have tools available. To call one, output exactly:",
+        '<tool_call>{"name": "TOOL_NAME", "args": {ARGS_JSON}}</tool_call>',
+        "Stop after the closing tag and wait for the result before continuing.",
+        "\nTools:",
+    ]
+    for t in tools:
+        fn = t["function"]
+        params = ", ".join(fn["parameters"]["properties"].keys())
+        lines.append(f'- {fn["name"]}({params}): {fn["description"]}')
+    return "\n".join(lines)
+
+
+async def _build_system(query: str, tools: list[dict]) -> str:
     character_context = await get_character_context()
     memories = await retrieve_memories(query, n_results=MAX_MEMORY_RESULTS)
+    tool_prompt = _build_tool_prompt(tools)
+    base = character_context + tool_prompt
     if not memories:
-        return character_context
+        return base
     memory_block = "\n".join(f"- {m['content']}" for m in memories)
-    return f"{character_context}\n\nRelevant memories:\n{memory_block}"
+    return f"{base}\n\nRelevant memories:\n{memory_block}"
 
 
 def _load_session_from_db(session_id: str) -> list[dict]:
@@ -64,14 +85,13 @@ async def list_sessions():
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
     history = _get_history(req.session_id)
-    system = await _build_system(req.message)
     tools = get_tools_for_plugins(req.enabled_plugins)
+    system = await _build_system(req.message, tools)
 
     base_messages = [{"role": "system", "content": system}]
     base_messages += history[-MAX_CONTEXT_MESSAGES:]
     base_messages.append({"role": "user", "content": req.message})
 
-    # Persist user message immediately so it survives client disconnects
     sessions_db.ensure_session(req.session_id, req.message)
     sessions_db.append_message(req.session_id, "user", req.message)
     history.append({"role": "user", "content": req.message})
@@ -79,91 +99,76 @@ async def chat_stream(req: ChatRequest):
     async def generate():
         full_content = ""
         full_thinking = ""
-        full_tool_calls = []  # [{name, args, result}] accumulated across all iterations
-        # working_messages grows as tool results are appended
+        full_tool_calls = []
         working_messages = list(base_messages)
 
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
-                create_kwargs = dict(
+                stream = await client.chat.completions.create(
                     model=VMLX_MODEL,
                     messages=working_messages,
                     stream=True,
                     max_tokens=MAX_TOKENS,
+                    timeout=120,
                 )
-                if tools:
-                    create_kwargs["tools"] = tools
 
-                stream = await client.chat.completions.create(**create_kwargs)
-
-                tool_calls_buf: dict[int, dict] = {}
-                finish_reason = None
+                content_buf = ""
 
                 async for chunk in stream:
+                    if not chunk.choices:
+                        continue
                     choice = chunk.choices[0]
                     delta = choice.delta
-                    finish_reason = choice.finish_reason or finish_reason
 
-                    # Reasoning (thinking)
                     reasoning = _get_reasoning(delta)
                     if reasoning:
                         full_thinking += reasoning
                         yield f"data: {json.dumps({'reasoning_delta': reasoning})}\n\n"
 
-                    # Content tokens
                     if delta.content:
-                        full_content += delta.content
-                        yield f"data: {json.dumps({'delta': delta.content})}\n\n"
+                        content_buf += delta.content
 
-                    # Tool call chunks — accumulate across multiple chunks
-                    tc_list = getattr(delta, 'tool_calls', None) or []
-                    for tc in tc_list:
-                        idx = tc.index
-                        if idx not in tool_calls_buf:
-                            tool_calls_buf[idx] = {"id": "", "name": "", "args": ""}
-                        if tc.id:
-                            tool_calls_buf[idx]["id"] = tc.id
-                        if tc.function and tc.function.name:
-                            tool_calls_buf[idx]["name"] = tc.function.name
-                        if tc.function and tc.function.arguments:
-                            tool_calls_buf[idx]["args"] += tc.function.arguments
+                print(f"[chat] iteration={_iteration} content_len={len(content_buf)}")
 
-                # ── Tool calls to execute ──────────────────────────────────
-                if finish_reason == "tool_calls" and tool_calls_buf:
-                    assistant_tool_calls = []
-                    for idx in sorted(tool_calls_buf.keys()):
-                        tc = tool_calls_buf[idx]
+                # Check if the model embedded a tool call in its content
+                tool_match = TOOL_CALL_RE.search(content_buf)
+                if tool_match and tool_match.group(1).strip() and tools:
+                    # Yield any text before the tool call tag
+                    before = content_buf[:content_buf.index("<tool_call>")].strip()
+                    if before:
+                        full_content += before
+                        yield f"data: {json.dumps({'delta': before})}\n\n"
+
+                    for match in TOOL_CALL_RE.finditer(content_buf):
                         try:
-                            args = json.loads(tc["args"]) if tc["args"] else {}
-                        except Exception:
-                            args = {}
+                            tc = json.loads(match.group(1).strip())
+                            name = tc.get("name", "")
+                            args = tc.get("args", tc.get("arguments", {}))
+                        except Exception as parse_err:
+                            print(f"[chat] tool call parse error: {parse_err} raw={match.group(1)!r}")
+                            continue
 
-                        yield f"data: {json.dumps({'tool_call': {'name': tc['name'], 'args': args}})}\n\n"
+                        yield f"data: {json.dumps({'tool_call': {'name': name, 'args': args}})}\n\n"
+                        yield ": heartbeat\n\n"
 
-                        result = await execute_tool(req.enabled_plugins, tc["name"], args)
-                        full_tool_calls.append({"name": tc["name"], "args": args, "result": result})
+                        result = await execute_tool(req.enabled_plugins, name, args)
+                        full_tool_calls.append({"name": name, "args": args, "result": result})
 
-                        yield f"data: {json.dumps({'tool_result': {'name': tc['name'], 'output': result}})}\n\n"
+                        yield f"data: {json.dumps({'tool_result': {'name': name, 'output': result}})}\n\n"
 
-                        assistant_tool_calls.append({
-                            "id": tc["id"],
-                            "type": "function",
-                            "function": {"name": tc["name"], "arguments": tc["args"]},
-                        })
+                        working_messages.append({"role": "assistant", "content": content_buf})
                         working_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc["id"],
-                            "content": result,
+                            "role": "user",
+                            "content": f"[Tool result: {name}]\n{result}\n\nNow respond based on this."
                         })
 
-                    # Inject assistant's tool_calls message before the tool results
-                    working_messages.insert(
-                        len(working_messages) - len(tool_calls_buf),
-                        {"role": "assistant", "tool_calls": assistant_tool_calls},
-                    )
-                    continue  # next LLM call with tool results
+                    continue  # next iteration → model responds with the result
 
-                break  # finish_reason == "stop" or no tool calls
+                # No tool call — yield buffered content and finish
+                if content_buf:
+                    full_content += content_buf
+                    yield f"data: {json.dumps({'delta': content_buf})}\n\n"
+                break
 
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -189,7 +194,7 @@ async def chat_stream(req: ChatRequest):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     history = _get_history(req.session_id)
-    system = await _build_system(req.message)
+    system = await _build_system(req.message, [])
 
     messages = [{"role": "system", "content": system}]
     messages += history[-MAX_CONTEXT_MESSAGES:]

@@ -9,6 +9,14 @@ export const PLUGIN_REGISTRY = [
     tags: ['shell', 'files', 'python'],
     status: 'active',
   },
+  {
+    id: 'wikisearch',
+    name: 'WikiSearch',
+    icon: '📖',
+    description: 'Let Cosmos search and read Wikipedia articles to answer factual questions with up-to-date, sourced information.',
+    tags: ['wikipedia', 'search', 'knowledge'],
+    status: 'active',
+  },
 ]
 
 const STORAGE_KEY = 'cosmos-plugins'

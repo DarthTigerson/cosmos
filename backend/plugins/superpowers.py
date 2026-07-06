@@ -23,39 +23,16 @@ class SuperpowersPlugin(Plugin):
     name = "superpowers"
 
     tools = [
-        _tool(
-            "run_shell",
-            "Execute a shell command on the user's Mac. Returns stdout and stderr. Use for file operations, system info, running scripts, etc.",
-            {"cmd": {"type": "string", "description": "The shell command to run"}},
-            ["cmd"],
-        ),
-        _tool(
-            "read_file",
-            "Read the contents of a file on the user's machine.",
-            {"path": {"type": "string", "description": "Absolute or ~ path to the file"}},
-            ["path"],
-        ),
-        _tool(
-            "write_file",
-            "Write content to a file on the user's machine. Creates or overwrites.",
-            {
-                "path": {"type": "string", "description": "Absolute or ~ path to write"},
-                "content": {"type": "string", "description": "Content to write"},
-            },
-            ["path", "content"],
-        ),
-        _tool(
-            "list_files",
-            "List files and directories at a given path.",
-            {"path": {"type": "string", "description": "Directory path to list"}},
-            ["path"],
-        ),
-        _tool(
-            "python_eval",
-            "Execute Python code and return the output. Good for calculations, data processing, etc.",
-            {"code": {"type": "string", "description": "Python code to execute"}},
-            ["code"],
-        ),
+        _tool("run_shell", "Run a shell command. Returns stdout/stderr.",
+              {"cmd": {"type": "string"}}, ["cmd"]),
+        _tool("read_file", "Read a file.",
+              {"path": {"type": "string"}}, ["path"]),
+        _tool("write_file", "Write content to a file.",
+              {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
+        _tool("list_files", "List directory contents.",
+              {"path": {"type": "string"}}, ["path"]),
+        _tool("python_eval", "Execute Python code. Returns output.",
+              {"code": {"type": "string"}}, ["code"]),
     ]
 
     async def execute(self, tool_name: str, args: dict) -> str:

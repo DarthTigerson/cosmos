@@ -51,32 +51,39 @@ function ThinkingBlock({ content, streamingPhase }) {
   )
 }
 
+function ToolCall({ call }) {
+  const [open, setOpen] = useState(false)
+  const done = call.result != null
+
+  return (
+    <div className={`tool-block${done ? ' tool-block--done' : ' tool-block--running'}`}>
+      <button className="tool-block-header" onClick={() => done && setOpen(o => !o)}>
+        <span className="tool-block-icon">⚡</span>
+        <span className="tool-block-name">{call.name}</span>
+        {Object.entries(call.args).map(([k, v]) => (
+          <span key={k} className="tool-arg-inline">
+            <span className="tool-arg-key">{k}:</span>
+            <span className="tool-arg-val">{String(v).slice(0, 60)}</span>
+          </span>
+        ))}
+        <span className="tool-block-spacer" />
+        {done
+          ? <span className="tool-block-status">✓</span>
+          : <span className="tool-block-status tool-block-status--spin">◈</span>
+        }
+        {done && <span className={`thinking-chevron${open ? ' open' : ''}`}>›</span>}
+      </button>
+      {open && done && (
+        <pre className="tool-block-result">{call.result}</pre>
+      )}
+    </div>
+  )
+}
+
 function ToolBlock({ calls }) {
   return (
     <div className="tool-blocks">
-      {calls.map((call, i) => (
-        <div key={i} className={`tool-block${call.result != null ? ' tool-block--done' : ' tool-block--running'}`}>
-          <div className="tool-block-header">
-            <span className="tool-block-icon">⚡</span>
-            <span className="tool-block-name">{call.name}</span>
-            {call.result != null
-              ? <span className="tool-block-status">✓</span>
-              : <span className="tool-block-status tool-block-status--spin">◈</span>
-            }
-          </div>
-          <div className="tool-block-args">
-            {Object.entries(call.args).map(([k, v]) => (
-              <span key={k} className="tool-arg">
-                <span className="tool-arg-key">{k}</span>
-                <span className="tool-arg-val">{String(v).slice(0, 120)}</span>
-              </span>
-            ))}
-          </div>
-          {call.result != null && (
-            <pre className="tool-block-result">{call.result}</pre>
-          )}
-        </div>
-      ))}
+      {calls.map((call, i) => <ToolCall key={i} call={call} />)}
     </div>
   )
 }

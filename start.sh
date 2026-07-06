@@ -22,5 +22,12 @@ echo "  Frontend: http://localhost:5173"
 echo ""
 echo "Press Ctrl+C to stop."
 
-trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; echo 'Cosmos stopped.'" INT TERM
+cleanup() {
+    echo "Stopping Cosmos..."
+    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
+    pkill -P $BACKEND_PID 2>/dev/null
+    pkill -P $FRONTEND_PID 2>/dev/null
+    echo "Cosmos stopped."
+}
+trap cleanup INT TERM
 wait

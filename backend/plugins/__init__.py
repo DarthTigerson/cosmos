@@ -1,8 +1,10 @@
 from .base import Plugin
 from .superpowers import SuperpowersPlugin
+from .wikisearch import WikiSearchPlugin
 
 REGISTRY: dict[str, Plugin] = {
     "superpowers": SuperpowersPlugin(),
+    "wikisearch": WikiSearchPlugin(),
 }
 
 
