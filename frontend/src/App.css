@@ -566,6 +566,18 @@ body {
   box-shadow: none;
 }
 
+.stop-btn {
+  background: #c0392b;
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 2px 12px rgba(192, 57, 43, 0.35);
+}
+.stop-btn:hover {
+  opacity: 0.88;
+  transform: scale(1.06);
+  box-shadow: 0 3px 16px rgba(192, 57, 43, 0.5);
+}
+
 /* ── Settings overlay ── */
 .settings-overlay {
   position: fixed;

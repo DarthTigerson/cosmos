@@ -115,6 +115,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+  const abortRef = useRef(null)
 
   useEffect(() => { initSettings() }, [])
 
@@ -131,7 +132,13 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  function abortStream() {
+    abortRef.current?.abort()
+    abortRef.current = null
+  }
+
   async function selectSession(id) {
+    abortStream()
     try {
       const res = await fetch(`/sessions/${id}/history`)
       const data = await res.json()
@@ -145,6 +152,7 @@ export default function App() {
   }
 
   function newChat() {
+    abortStream()
     setSessionId(newSessionId())
     setMessages([])
     inputRef.current?.focus()
@@ -160,6 +168,8 @@ export default function App() {
     const text = input.trim()
     if (!text || loading) return
 
+    abortRef.current = new AbortController()
+
     setMessages(m => [
       ...m,
       { role: 'user', content: text },
@@ -173,6 +183,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, session_id: sessionId }),
+        signal: abortRef.current.signal,
       })
 
       // Session is created on the backend before the first byte — update sidebar now
@@ -213,12 +224,15 @@ export default function App() {
           } catch { break outer }
         }
       }
-    } catch {
-      setMessages(m => [
-        ...m.slice(0, -1),
-        { role: 'assistant', content: 'Something went wrong. Is vmlx running?', thinking: null },
-      ])
+    } catch (e) {
+      if (e?.name !== 'AbortError') {
+        setMessages(m => [
+          ...m.slice(0, -1),
+          { role: 'assistant', content: 'Something went wrong. Is vmlx running?', thinking: null },
+        ])
+      }
     } finally {
+      abortRef.current = null
       setLoading(false)
       setMessages(m => {
         const last = m[m.length - 1]
@@ -276,9 +290,10 @@ export default function App() {
             rows={1}
             disabled={loading}
           />
-          <button className="send-btn" onClick={send} disabled={loading || !input.trim()}>
-            ↑
-          </button>
+          {loading
+            ? <button className="send-btn stop-btn" onClick={abortStream}>■</button>
+            : <button className="send-btn" onClick={send} disabled={!input.trim()}>↑</button>
+          }
         </footer>
       </div>
     </div>
