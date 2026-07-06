@@ -68,8 +68,10 @@ async def chat_stream(req: ChatRequest):
     messages += history[-MAX_CONTEXT_MESSAGES:]
     messages.append({"role": "user", "content": req.message})
 
-    # Create session in DB on first message (title = first 80 chars of message)
+    # Persist user message immediately so it survives client disconnects
     sessions_db.ensure_session(req.session_id, req.message)
+    sessions_db.append_message(req.session_id, "user", req.message)
+    history.append({"role": "user", "content": req.message})
 
     async def generate():
         full_content = ""
@@ -94,17 +96,16 @@ async def chat_stream(req: ChatRequest):
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
+        finally:
+            # Runs even on client disconnect (GeneratorExit) — sync DB calls only
+            sessions_db.append_message(req.session_id, "assistant", full_content, full_thinking or None)
+            sessions_db.touch_session(req.session_id)
+            if full_content:
+                history.append({"role": "assistant", "content": full_content})
 
-        sessions_db.append_message(req.session_id, "user", req.message)
-        sessions_db.append_message(req.session_id, "assistant", full_content, full_thinking or None)
-        sessions_db.touch_session(req.session_id)
-
-        history.append({"role": "user", "content": req.message})
-        history.append({"role": "assistant", "content": full_content})
-
+        # Only reached on clean completion (not on disconnect or error)
         await maybe_store_exchange(req.message, full_content)
         await extract_and_store_traits(req.message, full_content)
-
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(
