@@ -140,6 +140,43 @@ async def maybe_store_exchange(user_msg: str, assistant_msg: str):
     await store_memory(content, {"type": "exchange"})
 
 
+async def get_unprocessed_exchanges(limit: int = 15) -> list[dict]:
+    """Return exchange memories that haven't been consolidated yet."""
+    if not _memories or _memories.count() == 0:
+        return []
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(
+        None, lambda: _memories.get(
+            where={"type": {"$eq": "exchange"}},
+            include=["documents", "metadatas", "ids"],
+        )
+    )
+    items = []
+    for id_, doc, meta in zip(results["ids"], results["documents"], results["metadatas"]):
+        if not meta.get("consolidated"):
+            items.append({"id": id_, "content": doc, "metadata": meta})
+    return items[:limit]
+
+
+async def mark_exchanges_consolidated(ids: list[str]):
+    """Merge consolidated=true into each exchange's existing metadata."""
+    if not ids:
+        return
+    loop = asyncio.get_event_loop()
+    existing = await loop.run_in_executor(
+        None, lambda: _memories.get(ids=ids, include=["metadatas"])
+    )
+    updated = [{**m, "consolidated": "true"} for m in existing["metadatas"]]
+    await loop.run_in_executor(
+        None, lambda: _memories.update(ids=ids, metadatas=updated)
+    )
+
+
+async def store_insight(content: str) -> str:
+    """Store a consolidated insight derived from conversation exchanges."""
+    return await store_memory(content, {"type": "insight"})
+
+
 async def list_knowledge_sources() -> list[dict]:
     """Return unique show/episode sources from cosmos_knowledge with chunk counts."""
     if not _knowledge or _knowledge.count() == 0:

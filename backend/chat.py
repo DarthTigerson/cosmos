@@ -2,6 +2,7 @@ import json
 import os
 import re as _re
 from collections import defaultdict
+from datetime import datetime as _dt
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
@@ -11,6 +12,8 @@ from character import get_character_context, extract_and_store_traits
 from plugins import get_tools_for_plugins, execute_tool
 import sessions_db
 import questions_db
+import follow_ups_db
+import consolidation
 
 router = APIRouter()
 
@@ -55,10 +58,11 @@ def _build_tool_prompt(tools: list[dict]) -> str:
 
 
 async def _build_system(query: str, tools: list[dict]) -> str:
+    now = _dt.now().strftime("%A, %B %-d %Y · %I:%M %p")
     character_context = await get_character_context()
     memories = await retrieve_memories(query, n_results=MAX_MEMORY_RESULTS)
     tool_prompt = _build_tool_prompt(tools)
-    base = character_context + tool_prompt
+    base = f"Today is {now}.\n\n" + character_context + tool_prompt
 
     if not memories:
         return base
@@ -89,10 +93,14 @@ async def _build_system(query: str, tools: list[dict]) -> str:
     # Inject recent loop closures so Cosmos knows when Thomas has answered her questions
     recent_learnings = questions_db.get_recent_resolutions(days=7)
     if recent_learnings:
-        lines = []
-        for q in recent_learnings[:5]:
-            lines.append(f"- {q['question']} → {q['thomas_answer']}")
+        lines = [f"- {q['question']} → {q['thomas_answer']}" for q in recent_learnings[:5]]
         sections.append("Recent learnings (Thomas answered these for you this week):\n" + "\n".join(lines))
+
+    # Surface open follow-ups at the start of every session
+    open_followups = follow_ups_db.get_open()
+    if open_followups:
+        lines = [f"- [{f['id']}] {f['content']}" for f in open_followups[:5]]
+        sections.append("Open follow-ups (check if any have been addressed):\n" + "\n".join(lines))
 
     system = base + "\n\n" + "\n\n".join(sections)
     if knowledge:
@@ -218,6 +226,7 @@ async def chat_stream(req: ChatRequest):
 
         await maybe_store_exchange(req.message, full_content)
         await extract_and_store_traits(req.message, full_content)
+        consolidation.touch_activity()
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(

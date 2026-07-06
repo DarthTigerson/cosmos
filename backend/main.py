@@ -21,6 +21,8 @@ from memory import init_memory
 from sessions_db import init_db
 import podcasts_db
 import questions_db
+import follow_ups_db
+import consolidation
 
 
 @asynccontextmanager
@@ -29,7 +31,10 @@ async def lifespan(app: FastAPI):
     init_db()
     podcasts_db.init_db()
     questions_db.init_db()
+    follow_ups_db.init_db()
     await init_memory()
+    import asyncio
+    asyncio.get_event_loop().create_task(consolidation.consolidation_loop())
     yield
 
 

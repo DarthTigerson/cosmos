@@ -49,6 +49,14 @@ export const PLUGIN_REGISTRY = [
     tags: ['memory', 'context', 'compression'],
     status: 'active',
   },
+  {
+    id: 'followup',
+    name: 'Follow-ups',
+    icon: '🔁',
+    description: 'Let Cosmos create follow-up reminders for herself — when Thomas says he\'ll try something or she wants to check in next session. Open follow-ups surface automatically at the start of each conversation.',
+    tags: ['memory', 'continuity', 'reminders'],
+    status: 'active',
+  },
 ]
 
 const STORAGE_KEY = 'cosmos-plugins'

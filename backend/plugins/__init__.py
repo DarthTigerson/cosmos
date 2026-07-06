@@ -5,6 +5,7 @@ from .ask_thomas import AskThomasPlugin
 from .remember import RememberPlugin
 from .knowledge import KnowledgePlugin
 from .compress import CompressPlugin
+from .followup import FollowUpPlugin
 
 REGISTRY: dict[str, Plugin] = {
     "superpowers": SuperpowersPlugin(),
@@ -13,6 +14,7 @@ REGISTRY: dict[str, Plugin] = {
     "remember": RememberPlugin(),
     "knowledge": KnowledgePlugin(),
     "compress": CompressPlugin(),
+    "followup": FollowUpPlugin(),
 }
 
 
