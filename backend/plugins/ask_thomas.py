@@ -32,7 +32,7 @@ class AskThomasPlugin(Plugin):
         ),
     ]
 
-    async def execute(self, tool_name: str, args: dict) -> str:
+    async def execute(self, tool_name: str, args: dict, context: dict = None) -> str:
         if tool_name == "create_question":
             qid = questions_db.create_question(
                 question=args.get("question", ""),

@@ -35,7 +35,7 @@ class SuperpowersPlugin(Plugin):
               {"code": {"type": "string"}}, ["code"]),
     ]
 
-    async def execute(self, tool_name: str, args: dict) -> str:
+    async def execute(self, tool_name: str, args: dict, context: dict = None) -> str:
         loop = asyncio.get_event_loop()
         try:
             if tool_name == "run_shell":

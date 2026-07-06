@@ -138,3 +138,47 @@ async def retrieve_memories(query: str, n_results: int = 5) -> list[dict]:
 async def maybe_store_exchange(user_msg: str, assistant_msg: str):
     content = f"User: {user_msg}\nCosmos: {assistant_msg}"
     await store_memory(content, {"type": "exchange"})
+
+
+async def list_knowledge_sources() -> list[dict]:
+    """Return unique show/episode sources from cosmos_knowledge with chunk counts."""
+    if not _knowledge or _knowledge.count() == 0:
+        return []
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, lambda: _knowledge.get(include=["metadatas"]))
+    sources: dict[tuple, int] = {}
+    for meta in results["metadatas"]:
+        key = (
+            meta.get("show", "Unknown"),
+            meta.get("episode", ""),
+            (meta.get("pub_date") or "")[:10],
+        )
+        sources[key] = sources.get(key, 0) + 1
+    return [
+        {"show": k[0], "episode": k[1], "pub_date": k[2], "chunks": v}
+        for k, v in sorted(sources.items(), key=lambda x: x[0][2], reverse=True)
+    ]
+
+
+async def search_knowledge_chunks(query: str, n_results: int = 5) -> list[dict]:
+    """Search cosmos_knowledge and return matches above threshold."""
+    if not _knowledge or _knowledge.count() == 0:
+        return []
+    loop = asyncio.get_event_loop()
+    embedding = await loop.run_in_executor(None, lambda: _embed(query))
+    k = _knowledge.query(
+        query_embeddings=[embedding],
+        n_results=min(n_results, _knowledge.count()),
+        include=["documents", "metadatas", "distances"],
+    )
+    results = []
+    for doc, meta, dist in zip(k["documents"][0], k["metadatas"][0], k["distances"][0]):
+        relevance = round(1 - dist, 3)
+        if relevance >= KNOWLEDGE_THRESHOLD:
+            results.append({
+                "content": doc,
+                "metadata": meta,
+                "relevance": relevance,
+                "collection": "knowledge",
+            })
+    return results

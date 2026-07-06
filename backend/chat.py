@@ -10,6 +10,7 @@ from memory import retrieve_memories, maybe_store_exchange
 from character import get_character_context, extract_and_store_traits
 from plugins import get_tools_for_plugins, execute_tool
 import sessions_db
+import questions_db
 
 router = APIRouter()
 
@@ -84,6 +85,14 @@ async def _build_system(query: str, tools: list[dict]) -> str:
             snippet = m['content'][:400].rsplit(' ', 1)[0] + "…"
             lines.append(f"- [{label}] {snippet}")
         sections.append("Relevant knowledge from ingested content:\n" + "\n".join(lines))
+
+    # Inject recent loop closures so Cosmos knows when Thomas has answered her questions
+    recent_learnings = questions_db.get_recent_resolutions(days=7)
+    if recent_learnings:
+        lines = []
+        for q in recent_learnings[:5]:
+            lines.append(f"- {q['question']} → {q['thomas_answer']}")
+        sections.append("Recent learnings (Thomas answered these for you this week):\n" + "\n".join(lines))
 
     system = base + "\n\n" + "\n\n".join(sections)
     if knowledge:
@@ -178,7 +187,7 @@ async def chat_stream(req: ChatRequest):
                         yield f"data: {json.dumps({'tool_call': {'name': name, 'args': args}})}\n\n"
                         yield ": heartbeat\n\n"
 
-                        result = await execute_tool(req.enabled_plugins, name, args)
+                        result = await execute_tool(req.enabled_plugins, name, args, context={"session_id": req.session_id, "sessions": _sessions})
                         full_tool_calls.append({"name": name, "args": args, "result": result})
 
                         yield f"data: {json.dumps({'tool_result': {'name': name, 'output': result}})}\n\n"

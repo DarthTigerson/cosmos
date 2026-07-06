@@ -63,12 +63,10 @@ async def resolve_question(qid: str, req: ResolveRequest):
         return {"error": "not found"}
 
     if req.store_memory and q.get("thomas_answer"):
-        # Build a clean memory from the resolved exchange
-        parts = [f"Q: {q['question']}"]
-        if q.get("source_text"):
-            parts.append(f"Context: {q['source_text'][:600]}")
-        parts.append(f"A: {q['thomas_answer']}")
-        memory_content = "\n".join(parts)
+        # "Thomas confirmed" format — clear loop-closure signal for retrieval
+        memory_content = f"Thomas confirmed: {q['question']} → {q['thomas_answer']}"
+        if q.get("source_ref"):
+            memory_content += f" (source: {q['source_ref']})"
 
         from memory import store_memory
         await store_memory(memory_content, {

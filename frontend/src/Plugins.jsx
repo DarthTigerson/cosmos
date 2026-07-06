@@ -25,6 +25,30 @@ export const PLUGIN_REGISTRY = [
     tags: ['questions', 'memory', 'learning'],
     status: 'active',
   },
+  {
+    id: 'remember',
+    name: 'Remember This',
+    icon: '🧠',
+    description: 'Give Cosmos the ability to write directly to her own memory — things she notices, connections she makes, details she decides are worth holding. Her own agency over what she keeps.',
+    tags: ['memory', 'agency', 'self'],
+    status: 'active',
+  },
+  {
+    id: 'knowledge',
+    name: 'Knowledge',
+    icon: '📚',
+    description: 'Let Cosmos see and search what she\'s ingested — podcasts, episodes, sources. She can list everything she\'s heard and search her knowledge index directly.',
+    tags: ['podcasts', 'knowledge', 'search'],
+    status: 'active',
+  },
+  {
+    id: 'compress',
+    name: 'Compress Context',
+    icon: '🗜️',
+    description: 'Let Cosmos compress a long conversation herself — she summarises what\'s been covered, stores it to memory, and clears the raw history. Her own control over context pressure.',
+    tags: ['memory', 'context', 'compression'],
+    status: 'active',
+  },
 ]
 
 const STORAGE_KEY = 'cosmos-plugins'

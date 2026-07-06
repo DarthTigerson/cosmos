@@ -2,11 +2,17 @@ from .base import Plugin
 from .superpowers import SuperpowersPlugin
 from .wikisearch import WikiSearchPlugin
 from .ask_thomas import AskThomasPlugin
+from .remember import RememberPlugin
+from .knowledge import KnowledgePlugin
+from .compress import CompressPlugin
 
 REGISTRY: dict[str, Plugin] = {
     "superpowers": SuperpowersPlugin(),
     "wikisearch": WikiSearchPlugin(),
     "ask_thomas": AskThomasPlugin(),
+    "remember": RememberPlugin(),
+    "knowledge": KnowledgePlugin(),
+    "compress": CompressPlugin(),
 }
 
 
@@ -18,12 +24,12 @@ def get_tools_for_plugins(plugin_ids: list[str]) -> list[dict]:
     return tools
 
 
-async def execute_tool(plugin_ids: list[str], tool_name: str, args: dict) -> str:
+async def execute_tool(plugin_ids: list[str], tool_name: str, args: dict, context: dict = None) -> str:
     for pid in plugin_ids:
         plugin = REGISTRY.get(pid)
         if plugin is None:
             continue
         for t in plugin.tools:
             if t["function"]["name"] == tool_name:
-                return await plugin.execute(tool_name, args)
+                return await plugin.execute(tool_name, args, context)
     return f"No plugin handles tool: {tool_name}"

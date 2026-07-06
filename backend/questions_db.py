@@ -87,3 +87,20 @@ def pending_count():
         return c.execute(
             "SELECT COUNT(*) FROM questions WHERE status='pending'"
         ).fetchone()[0]
+
+
+def get_recent_resolutions(days: int = 7):
+    """Return questions resolved within the last N days that have an answer."""
+    with _conn() as c:
+        rows = c.execute(
+            """
+            SELECT * FROM questions
+            WHERE status='resolved'
+              AND thomas_answer IS NOT NULL
+              AND thomas_answer != ''
+              AND resolved_at >= datetime('now', ?)
+            ORDER BY resolved_at DESC
+            """,
+            (f"-{days} days",),
+        ).fetchall()
+        return [dict(r) for r in rows]

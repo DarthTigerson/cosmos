@@ -30,7 +30,7 @@ class WikiSearchPlugin(Plugin):
               {"title": {"type": "string"}}, ["title"]),
     ]
 
-    async def execute(self, tool_name: str, args: dict) -> str:
+    async def execute(self, tool_name: str, args: dict, context: dict = None) -> str:
         loop = asyncio.get_event_loop()
         try:
             if tool_name == "wiki_search":

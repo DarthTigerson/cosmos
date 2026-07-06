@@ -6,5 +6,5 @@ class Plugin(ABC):
     tools: list[dict]  # OpenAI-format tool schemas
 
     @abstractmethod
-    async def execute(self, tool_name: str, args: dict) -> str:
+    async def execute(self, tool_name: str, args: dict, context: dict = None) -> str:
         ...
