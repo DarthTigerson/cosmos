@@ -226,11 +226,11 @@ body {
 }
 
 .cosmos-glyph.slow {
-  animation: spin-slow 6s linear infinite;
+  animation: spin-weighted 5s linear infinite;
 }
 
 .cosmos-glyph.fast {
-  animation: spin-slow 1.4s linear infinite;
+  animation: spin-weighted 1.6s linear infinite;
 }
 
 .cosmos-glyph.offline {
@@ -464,6 +464,17 @@ body {
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+@keyframes spin-weighted {
+  0%   { transform: rotate(0deg); }
+  6%   { transform: rotate(6deg); }
+  18%  { transform: rotate(60deg); }
+  34%  { transform: rotate(190deg); }
+  50%  { transform: rotate(310deg); }
+  62%  { transform: rotate(354deg); }
+  68%  { transform: rotate(360deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .thinking-label {
