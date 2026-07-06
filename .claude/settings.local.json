@@ -4,7 +4,10 @@
       "WebSearch",
       "Bash(pip show *)",
       "Bash(pip3 show *)",
-      "Read(//Users/thomas/**)"
+      "Read(//Users/thomas/**)",
+      "Bash(bash start.sh)",
+      "Bash(kill %1)",
+      "Bash(wait)"
     ]
   }
 }

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import Settings, { initSettings } from './Settings.jsx'
+import PluginsPage, { getEnabledPluginIds } from './Plugins.jsx'
 import './App.css'
 
 function newSessionId() {
@@ -50,17 +51,49 @@ function ThinkingBlock({ content, streamingPhase }) {
   )
 }
 
+function ToolBlock({ calls }) {
+  return (
+    <div className="tool-blocks">
+      {calls.map((call, i) => (
+        <div key={i} className={`tool-block${call.result != null ? ' tool-block--done' : ' tool-block--running'}`}>
+          <div className="tool-block-header">
+            <span className="tool-block-icon">⚡</span>
+            <span className="tool-block-name">{call.name}</span>
+            {call.result != null
+              ? <span className="tool-block-status">✓</span>
+              : <span className="tool-block-status tool-block-status--spin">◈</span>
+            }
+          </div>
+          <div className="tool-block-args">
+            {Object.entries(call.args).map(([k, v]) => (
+              <span key={k} className="tool-arg">
+                <span className="tool-arg-key">{k}</span>
+                <span className="tool-arg-val">{String(v).slice(0, 120)}</span>
+              </span>
+            ))}
+          </div>
+          {call.result != null && (
+            <pre className="tool-block-result">{call.result}</pre>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Message({ msg }) {
   const isUser = msg.role === 'user'
   const hasThinking = msg.thinking != null && msg.thinking.length > 0
   const streamingThinking = !!msg.streamingThinking
+  const hasTools = msg.toolCalls && msg.toolCalls.length > 0
 
   return (
     <div className={`message ${isUser ? 'user' : 'cosmos'}`}>
       {!isUser && <div className="avatar">◈</div>}
       <div className="bubble-wrap">
         {hasThinking && <ThinkingBlock content={msg.thinking} streamingPhase={streamingThinking} />}
-        {!streamingThinking && (
+        {hasTools && <ToolBlock calls={msg.toolCalls} />}
+        {!streamingThinking && (msg.content || !msg.streaming) && (
           <div className="bubble">
             <Markdown>{msg.content?.trimStart()}</Markdown>
             {msg.streaming && <span className="cursor-inline" />}
@@ -72,9 +105,17 @@ function Message({ msg }) {
   )
 }
 
-function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }) {
+function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange }) {
   return (
     <aside className="sidebar">
+      <div
+        className={`sidebar-nav-item${view === 'plugins' ? ' active' : ''}`}
+        onClick={() => onViewChange(view === 'plugins' ? 'chat' : 'plugins')}
+      >
+        <span className="sidebar-nav-icon">⬡</span>
+        Plugins
+      </div>
+      <div className="sidebar-divider" />
       <div className="session-list">
         {sessions.length === 0 && (
           <div className="session-empty">No previous chats yet.</div>
@@ -113,6 +154,7 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [view, setView] = useState('chat')
   const [connected, setConnected] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -162,6 +204,7 @@ export default function App() {
         role: m.role,
         content: m.content,
         thinking: m.thinking || null,
+        toolCalls: m.tool_calls || null,
       })))
     } catch {}
   }
@@ -197,7 +240,11 @@ export default function App() {
       const res = await fetch('/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: sessionId }),
+        body: JSON.stringify({
+          message: text,
+          session_id: sessionId,
+          enabled_plugins: getEnabledPluginIds(),
+        }),
         signal: abortRef.current.signal,
       })
 
@@ -209,6 +256,7 @@ export default function App() {
       let buf = ''
       let thinking = ''
       let content = ''
+      let toolCalls = []
 
       outer: while (true) {
         const { done, value } = await reader.read()
@@ -225,14 +273,32 @@ export default function App() {
             if (evt.reasoning_delta) {
               thinking += evt.reasoning_delta
               setMessages(m => [...m.slice(0, -1), {
-                role: 'assistant', content, thinking, streaming: true, streamingThinking: true,
+                role: 'assistant', content, thinking, toolCalls, streaming: true, streamingThinking: true,
+              }])
+              await Promise.resolve()
+            }
+            if (evt.tool_call) {
+              toolCalls = [...toolCalls, { name: evt.tool_call.name, args: evt.tool_call.args, result: null }]
+              setMessages(m => [...m.slice(0, -1), {
+                role: 'assistant', content, thinking: thinking || null, toolCalls, streaming: true, streamingThinking: false,
+              }])
+              await Promise.resolve()
+            }
+            if (evt.tool_result) {
+              toolCalls = toolCalls.map(c =>
+                c.name === evt.tool_result.name && c.result === null
+                  ? { ...c, result: evt.tool_result.output }
+                  : c
+              )
+              setMessages(m => [...m.slice(0, -1), {
+                role: 'assistant', content, thinking: thinking || null, toolCalls, streaming: true, streamingThinking: false,
               }])
               await Promise.resolve()
             }
             if (evt.delta) {
               content += evt.delta
               setMessages(m => [...m.slice(0, -1), {
-                role: 'assistant', content, thinking: thinking || null, streaming: true, streamingThinking: false,
+                role: 'assistant', content, thinking: thinking || null, toolCalls, streaming: true, streamingThinking: false,
               }])
               await Promise.resolve()
             }
@@ -272,6 +338,8 @@ export default function App() {
         onSelect={selectSession}
         onNew={newChat}
         onDelete={deleteSession}
+        view={view}
+        onViewChange={setView}
       />
       <div className="app">
         <header className="header">
@@ -283,33 +351,39 @@ export default function App() {
         </header>
         {showSettings && <Settings onClose={() => setShowSettings(false)} />}
 
-        <main className="messages">
-          {messages.length === 0 && (
-            <div className="empty-state">
-              <div className={`cosmos-glyph empty-glyph${loading ? ' fast' : connected ? ' slow' : ' offline'}`}>◈</div>
-              <p>Ready when you are.</p>
-            </div>
-          )}
-          {messages.map((m, i) => <Message key={i} msg={m} />)}
-          <div ref={bottomRef} />
-        </main>
+        {view === 'plugins' ? (
+          <PluginsPage />
+        ) : (
+          <>
+            <main className="messages">
+              {messages.length === 0 && (
+                <div className="empty-state">
+                  <div className={`cosmos-glyph empty-glyph${loading ? ' fast' : connected ? ' slow' : ' offline'}`}>◈</div>
+                  <p>Ready when you are.</p>
+                </div>
+              )}
+              {messages.map((m, i) => <Message key={i} msg={m} />)}
+              <div ref={bottomRef} />
+            </main>
 
-        <footer className="input-area">
-          <textarea
-            ref={inputRef}
-            className="input"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Talk to Cosmos…"
-            rows={1}
-            disabled={loading}
-          />
-          {loading
-            ? <button className="send-btn stop-btn" onClick={abortStream}>■</button>
-            : <button className="send-btn" onClick={send} disabled={!input.trim()}>↑</button>
-          }
-        </footer>
+            <footer className="input-area">
+              <textarea
+                ref={inputRef}
+                className="input"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={onKey}
+                placeholder="Talk to Cosmos…"
+                rows={1}
+                disabled={loading}
+              />
+              {loading
+                ? <button className="send-btn stop-btn" onClick={abortStream}>■</button>
+                : <button className="send-btn" onClick={send} disabled={!input.trim()}>↑</button>
+              }
+            </footer>
+          </>
+        )}
       </div>
     </div>
   )

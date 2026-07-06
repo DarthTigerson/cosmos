@@ -30,10 +30,16 @@ def init_db():
                 role        TEXT NOT NULL,
                 content     TEXT NOT NULL,
                 thinking    TEXT,
+                tool_calls  TEXT,
                 created_at  TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             )
         """)
+        # migrate existing DBs that predate the tool_calls column
+        try:
+            c.execute("ALTER TABLE messages ADD COLUMN tool_calls TEXT")
+        except Exception:
+            pass
         c.commit()
 
 
@@ -53,7 +59,7 @@ def list_sessions():
 def get_messages(session_id: str):
     with _conn() as c:
         rows = c.execute(
-            "SELECT role, content, thinking FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, thinking, tool_calls FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -78,11 +84,11 @@ def touch_session(session_id: str):
         c.commit()
 
 
-def append_message(session_id: str, role: str, content: str, thinking: str = None):
+def append_message(session_id: str, role: str, content: str, thinking: str = None, tool_calls: str = None):
     with _conn() as c:
         c.execute(
-            "INSERT INTO messages (session_id, role, content, thinking, created_at) VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, thinking, datetime.utcnow().isoformat()),
+            "INSERT INTO messages (session_id, role, content, thinking, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, role, content, thinking, tool_calls, datetime.utcnow().isoformat()),
         )
         c.commit()
 

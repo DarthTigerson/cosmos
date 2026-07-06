@@ -11,6 +11,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
+    enabled_plugins: list[str] = []
 
 
 class ChatResponse(BaseModel):
