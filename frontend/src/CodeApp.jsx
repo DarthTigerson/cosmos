@@ -49,7 +49,7 @@ function IconTerminal() {
 
 // ── Terminal panel ────────────────────────────────────────────────────────────
 
-function TerminalPane({ projectRoot, visible, onToggle }) {
+function TerminalPane({ projectRoot, visible, onToggle, fontSize }) {
   const containerRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
@@ -62,7 +62,7 @@ function TerminalPane({ projectRoot, visible, onToggle }) {
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: fontSize ?? DEFAULT_FONT_SIZE,
       fontFamily: '"Menlo", "Monaco", "Courier New", monospace',
       lineHeight: 1.4,
       theme: {
@@ -117,6 +117,19 @@ function TerminalPane({ projectRoot, visible, onToggle }) {
       }, 50)
     }
   }, [visible])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term || !fontSize) return
+    term.options.fontSize = fontSize
+    setTimeout(() => {
+      fitRef.current?.fit()
+      const ws = wsRef.current
+      if (ws?.readyState === WebSocket.OPEN && term) {
+        ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }))
+      }
+    }, 20)
+  }, [fontSize])
 
   return (
     <div className="code-terminal" style={{ display: visible ? 'flex' : 'none', flexDirection: 'column' }}>
@@ -524,7 +537,6 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
               options={{
                 minimap: { enabled: false },
                 fontSize,
-                lineHeight: 20,
                 fontFamily: '"Menlo", "Monaco", "Courier New", monospace',
                 wordWrap: 'off',
                 scrollBeyondLastLine: false,
@@ -545,7 +557,6 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
               options={{
                 minimap: { enabled: false },
                 fontSize,
-                lineHeight: 20,
                 fontFamily: '"Menlo", "Monaco", "Courier New", monospace',
                 renderSideBySide: true,
                 readOnly: true,
@@ -559,6 +570,7 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
           projectRoot={project?.path}
           visible={terminalOpen}
           onToggle={() => setTerminalOpen(false)}
+          fontSize={fontSize}
         />
       </div>
 
