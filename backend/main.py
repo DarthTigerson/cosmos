@@ -25,6 +25,7 @@ import questions_db
 import follow_ups_db
 import consolidation
 from system_info import get_battery, get_network, get_memory, _load_readings
+import token_stats
 
 
 @asynccontextmanager
@@ -38,7 +39,31 @@ async def lifespan(app: FastAPI):
     await init_memory()
     import asyncio
     asyncio.get_event_loop().create_task(consolidation.consolidation_loop())
+    asyncio.get_event_loop().create_task(_fetch_context_limit())
     yield
+
+
+async def _fetch_context_limit():
+    import httpx, asyncio
+    await asyncio.sleep(2)
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("http://localhost:8080/health", timeout=5)
+            for b in r.json().get("backends", []):
+                port = b.get("port")
+                if port:
+                    try:
+                        br = await client.get(f"http://localhost:{port}/health", timeout=5)
+                        sched = br.json().get("cache", {}).get("scheduler_cache", {})
+                        max_blocks = sched.get("max_blocks", 0)
+                        block_size = sched.get("block_size", 64)
+                        if max_blocks:
+                            token_stats.set_context_limit(max_blocks * block_size)
+                            return
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Cosmos", lifespan=lifespan)
@@ -59,6 +84,11 @@ app.include_router(code_router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "name": "Cosmos"}
+
+
+@app.get("/model/stats")
+async def model_stats():
+    return token_stats.get()
 
 
 @app.get("/battery")

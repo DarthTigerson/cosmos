@@ -19,6 +19,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 import sessions_db
+import token_stats
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/code")
@@ -556,11 +557,15 @@ async def _do_generate(session_id: str, state: _GenState, messages: list, root: 
                 stream=True,
                 max_tokens=MAX_TOKENS,
                 timeout=120,
+                stream_options={"include_usage": True},
             )
 
             content_buf = ""
+            token_stats.generation_start()
             async for chunk in stream:
                 if not chunk.choices:
+                    if chunk.usage:
+                        token_stats.generation_done(chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
                     continue
                 delta = chunk.choices[0].delta
                 reasoning = (
@@ -572,6 +577,7 @@ async def _do_generate(session_id: str, state: _GenState, messages: list, root: 
                     state.push({"reasoning_delta": reasoning})
                 if delta.content:
                     content_buf += delta.content
+                    token_stats.token_produced()
 
             tool_match = TOOL_CALL_RE.search(content_buf)
             if tool_match and tool_match.group(1).strip():

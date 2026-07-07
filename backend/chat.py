@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from models import ChatRequest, ChatResponse
 from memory import retrieve_memories, maybe_store_exchange
 from character import get_character_context, extract_and_store_traits
+import token_stats
 from plugins import get_tools_for_plugins, execute_tool
 import sessions_db
 import questions_db
@@ -117,12 +118,16 @@ async def _do_generate(
                 stream=True,
                 max_tokens=MAX_TOKENS,
                 timeout=120,
+                stream_options={"include_usage": True},
             )
 
             content_buf = ""
+            token_stats.generation_start()
 
             async for chunk in stream:
                 if not chunk.choices:
+                    if chunk.usage:
+                        token_stats.generation_done(chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
                     continue
                 choice = chunk.choices[0]
                 delta = choice.delta
@@ -134,6 +139,7 @@ async def _do_generate(
 
                 if delta.content:
                     content_buf += delta.content
+                    token_stats.token_produced()
 
             print(f"[chat] iteration={_iteration} content_len={len(content_buf)}")
 

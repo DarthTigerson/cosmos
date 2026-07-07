@@ -169,6 +169,46 @@ function fmtGB(bytes) {
   return (bytes / 1073741824).toFixed(1)
 }
 
+function fmtK(n) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+function useModelStats() {
+  const [stats, setStats] = useState(null)
+  useEffect(() => {
+    const fetch_ = async () => {
+      try {
+        const res = await fetch('/model/stats')
+        setStats(await res.json())
+      } catch {}
+    }
+    fetch_()
+    const id = setInterval(fetch_, 3000)
+    return () => clearInterval(id)
+  }, [])
+  return stats
+}
+
+function ModelStatsWidget({ stats }) {
+  if (!stats || (!stats.prompt_tokens && !stats.context_limit)) return null
+  const used = stats.prompt_tokens + stats.completion_tokens
+  const limit = stats.context_limit
+  const pct = limit > 0 ? used / limit : 0
+  const color = pct > 0.85 ? 'var(--battery-low)' : pct > 0.65 ? 'var(--battery-warn)' : 'var(--text-dim)'
+  return (
+    <div className="model-stats-widget">
+      <span className="model-stats-ctx" style={{ color }}>
+        {fmtK(used)}{limit > 0 ? ` / ${fmtK(limit)}` : ''} ctx
+      </span>
+      {stats.tps > 0 && (
+        <span className="model-stats-tps">
+          {stats.tps} t/s
+        </span>
+      )}
+    </div>
+  )
+}
+
 function MemoryWidget({ mem }) {
   if (!mem) return null
   const totalUsed = fmtGB(mem.system_used_bytes)
@@ -956,6 +996,7 @@ export default function App() {
   const battery = useBattery()
   const net = useNetwork()
   const mem = useMemory()
+  const modelStats = useModelStats()
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -1310,6 +1351,7 @@ export default function App() {
             <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">
               <IconSettings />
             </button>
+            <ModelStatsWidget stats={modelStats} />
             <MemoryWidget mem={mem} />
             <WifiWidget net={net} />
             <BatteryWidget battery={battery} />

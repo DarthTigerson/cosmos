@@ -443,6 +443,19 @@ body {
 }
 .settings-btn:hover { color: var(--cosmos-accent); background: var(--cosmos-accent-dim); }
 
+.model-stats-widget {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+  border-right: 1px solid var(--border);
+  margin-right: 2px;
+}
+.model-stats-ctx { color: var(--text-dim); }
+.model-stats-tps { color: var(--text-dim); opacity: 0.7; }
+
 .memory-widget {
   display: flex;
   align-items: center;
