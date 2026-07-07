@@ -627,6 +627,97 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
 
 // ── Code file tree helpers ────────────────────────────────────────────────────
 
+const FILE_ICON_MAP = {
+  // JS family
+  js:   { bg: '#f7df1e', fg: '#000', l: 'JS' },
+  jsx:  { bg: '#61dafb', fg: '#000', l: 'JS' },
+  mjs:  { bg: '#f7df1e', fg: '#000', l: 'JS' },
+  cjs:  { bg: '#f7df1e', fg: '#000', l: 'JS' },
+  // TS family
+  ts:   { bg: '#3178c6', fg: '#fff', l: 'TS' },
+  tsx:  { bg: '#3178c6', fg: '#fff', l: 'TS' },
+  // Python
+  py:   { bg: '#3572A5', fg: '#fff', l: 'PY' },
+  // Web
+  html: { bg: '#e34c26', fg: '#fff', l: 'HT' },
+  css:  { bg: '#264de4', fg: '#fff', l: 'CS' },
+  scss: { bg: '#cd6799', fg: '#fff', l: 'SC' },
+  less: { bg: '#1d365d', fg: '#fff', l: 'LS' },
+  // Data/config
+  json: { bg: '#cb8f35', fg: '#fff', l: '{}' },
+  yml:  { bg: '#cb171e', fg: '#fff', l: 'YM' },
+  yaml: { bg: '#cb171e', fg: '#fff', l: 'YM' },
+  toml: { bg: '#9c4221', fg: '#fff', l: 'TM' },
+  xml:  { bg: '#f16529', fg: '#fff', l: 'XM' },
+  svg:  { bg: '#ffb13b', fg: '#000', l: 'SV' },
+  // Docs
+  md:   { bg: '#4285f4', fg: '#fff', l: 'MD' },
+  mdx:  { bg: '#4285f4', fg: '#fff', l: 'MD' },
+  txt:  { bg: '#5a5550', fg: '#fff', l: 'TX' },
+  // Shell
+  sh:   { bg: '#4EAA25', fg: '#fff', l: '>_' },
+  bash: { bg: '#4EAA25', fg: '#fff', l: '>_' },
+  zsh:  { bg: '#4EAA25', fg: '#fff', l: '>_' },
+  // Systems
+  go:   { bg: '#00ADD8', fg: '#fff', l: 'GO' },
+  rs:   { bg: '#dea584', fg: '#000', l: 'RS' },
+  c:    { bg: '#555555', fg: '#fff', l: ' C' },
+  cpp:  { bg: '#f34b7d', fg: '#fff', l: 'C+' },
+  h:    { bg: '#a97bff', fg: '#fff', l: ' H' },
+  hpp:  { bg: '#a97bff', fg: '#fff', l: ' H' },
+  cs:   { bg: '#178600', fg: '#fff', l: 'C#' },
+  java: { bg: '#b07219', fg: '#fff', l: 'JV' },
+  rb:   { bg: '#cc342d', fg: '#fff', l: 'RB' },
+  php:  { bg: '#4f5d95', fg: '#fff', l: 'PH' },
+  // DevOps
+  tf:         { bg: '#7b42bc', fg: '#fff', l: 'TF' },
+  dockerfile: { bg: '#2496ed', fg: '#fff', l: 'DF' },
+  // DB
+  sql: { bg: '#e38c00', fg: '#fff', l: 'SQ' },
+  // Frontend frameworks
+  vue:    { bg: '#41b883', fg: '#fff', l: 'VU' },
+  svelte: { bg: '#ff3e00', fg: '#fff', l: 'SV' },
+  // Special filenames (checked before ext)
+  _gitignore:     { bg: '#f05032', fg: '#fff', l: 'GI' },
+  _gitattributes: { bg: '#f05032', fg: '#fff', l: 'GI' },
+  _env:           { bg: '#4EAA25', fg: '#fff', l: '.E' },
+  _env_local:     { bg: '#4EAA25', fg: '#fff', l: '.E' },
+  _envlocal:      { bg: '#4EAA25', fg: '#fff', l: '.E' },
+  _lockfile:      { bg: '#5a5550', fg: '#fff', l: 'LK' },
+}
+
+function FileIcon({ name }) {
+  const lower = name.toLowerCase()
+  // Check special filenames first
+  const specials = ['.gitignore', '.gitattributes', '.env', '.env.local', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']
+  const specialKey = lower === '.gitignore' ? '_gitignore'
+    : lower === '.gitattributes' ? '_gitattributes'
+    : (lower === '.env' || lower.startsWith('.env.')) ? '_env'
+    : (lower.endsWith('.lock') || lower === 'package-lock.json') ? '_lockfile'
+    : null
+
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+  const isDockerfile = lower === 'dockerfile' || lower.startsWith('dockerfile.')
+
+  const cfg = (specialKey && FILE_ICON_MAP[specialKey])
+    || (isDockerfile && FILE_ICON_MAP.dockerfile)
+    || FILE_ICON_MAP[ext]
+    || { bg: '#3a3530', fg: '#888', l: '  ' }
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: 18, height: 13, borderRadius: 2,
+      background: cfg.bg, color: cfg.fg,
+      fontSize: 6.5, fontWeight: 800, fontFamily: 'monospace',
+      flexShrink: 0, letterSpacing: '-0.01em', lineHeight: 1,
+      userSelect: 'none',
+    }}>
+      {cfg.l}
+    </span>
+  )
+}
+
 function SidebarFileNode({ node, onOpen, expandedDirs, onToggle, changedPaths, depth = 0 }) {
   const isOpen = expandedDirs.has(node.path)
   const isModified = changedPaths?.has(node.path)
@@ -639,6 +730,7 @@ function SidebarFileNode({ node, onOpen, expandedDirs, onToggle, changedPaths, d
         onClick={() => onOpen(node.path)}
         title={node.path}
       >
+        <FileIcon name={node.name} />
         <span className="ftree-name">{node.name}</span>
         {isModified && <span className="ftree-dot" />}
       </div>
@@ -693,7 +785,7 @@ function CodeProjectModal({ projects, currentProject, onSelect, onAdd, onRemove,
       const data = await res.json()
       if (data.path) {
         setPath(data.path)
-        if (!name) setName(data.path.split('/').pop())
+        setName(data.path.split('/').pop())
       }
     } catch {}
     setPicking(false)
