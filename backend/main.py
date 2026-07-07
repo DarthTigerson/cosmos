@@ -39,31 +39,45 @@ async def lifespan(app: FastAPI):
     await init_memory()
     import asyncio
     asyncio.get_event_loop().create_task(consolidation.consolidation_loop())
-    asyncio.get_event_loop().create_task(_fetch_context_limit())
+    asyncio.get_event_loop().create_task(_fetch_model_hardware_stats())
     yield
 
 
-async def _fetch_context_limit():
+async def _fetch_model_hardware_stats():
     import httpx, asyncio
     await asyncio.sleep(2)
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get("http://localhost:8080/health", timeout=5)
-            for b in r.json().get("backends", []):
-                port = b.get("port")
-                if port:
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get("http://localhost:8080/health", timeout=5)
+                for b in r.json().get("backends", []):
+                    port = b.get("port")
+                    if not port:
+                        continue
                     try:
                         br = await client.get(f"http://localhost:{port}/health", timeout=5)
-                        sched = br.json().get("cache", {}).get("scheduler_cache", {})
+                        data = br.json()
+                        cache = data.get("cache", {})
+                        # Context limit from scheduler cache block count
+                        sched = cache.get("scheduler_cache", {})
                         max_blocks = sched.get("max_blocks", 0)
                         block_size = sched.get("block_size", 64)
                         if max_blocks:
                             token_stats.set_context_limit(max_blocks * block_size)
-                            return
+                        # Disk cache: SSM companion (has explicit budget)
+                        ssm = cache.get("ssm_companion", {}).get("disk", {})
+                        used = ssm.get("bytes", 0)
+                        budget = ssm.get("budget_bytes", 0)
+                        if budget:
+                            token_stats.set_disk_cache(
+                                round(used / 1_000_000),
+                                round(budget / 1_000_000),
+                            )
                     except Exception:
                         pass
-    except Exception:
-        pass
+        except Exception:
+            pass
+        await asyncio.sleep(60)
 
 
 app = FastAPI(title="Cosmos", lifespan=lifespan)

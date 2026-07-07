@@ -7,6 +7,8 @@ _stats = {
     "context_limit": 0,
     "tps": 0.0,
     "generating": False,
+    "disk_mb": 0,
+    "disk_budget_mb": 0,
 }
 
 # Timing state for live TPS
@@ -43,6 +45,11 @@ def generation_done(prompt_tokens: int, completion_tokens: int):
 
 def set_context_limit(limit: int):
     _stats["context_limit"] = limit
+
+
+def set_disk_cache(used_mb: int, budget_mb: int):
+    _stats["disk_mb"] = used_mb
+    _stats["disk_budget_mb"] = budget_mb
 
 
 def get() -> dict:

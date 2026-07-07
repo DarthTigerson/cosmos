@@ -189,6 +189,21 @@ function useModelStats() {
   return stats
 }
 
+function StorageWidget({ stats }) {
+  if (!stats?.disk_budget_mb) return null
+  const used = stats.disk_mb
+  const budget = stats.disk_budget_mb
+  const pct = used / budget
+  const color = pct > 0.9 ? 'var(--battery-low)' : pct > 0.75 ? 'var(--battery-warn)' : 'var(--text-dim)'
+  return (
+    <div className="model-stats-widget">
+      <span className="model-stats-ctx" style={{ color }}>
+        {used.toLocaleString()} / {budget.toLocaleString()} MB
+      </span>
+    </div>
+  )
+}
+
 function ModelStatsWidget({ stats }) {
   if (!stats || (!stats.prompt_tokens && !stats.context_limit)) return null
   const used = stats.prompt_tokens + stats.completion_tokens
@@ -1352,6 +1367,7 @@ export default function App() {
               <IconSettings />
             </button>
             <ModelStatsWidget stats={modelStats} />
+            <StorageWidget stats={modelStats} />
             <MemoryWidget mem={mem} />
             <WifiWidget net={net} />
             <BatteryWidget battery={battery} />
