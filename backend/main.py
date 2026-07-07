@@ -43,6 +43,20 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _get_block_cache_budget_gb() -> int:
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "ax", "-o", "command="], capture_output=True, text=True, timeout=3).stdout
+        for line in out.splitlines():
+            if "vmlx_engine" in line and "block-disk-cache-max-gb" in line:
+                parts = line.split("--block-disk-cache-max-gb")
+                if len(parts) > 1:
+                    return int(parts[1].strip().split()[0])
+    except Exception:
+        pass
+    return 0
+
+
 async def _fetch_model_hardware_stats():
     import httpx, asyncio
     await asyncio.sleep(2)
@@ -64,14 +78,15 @@ async def _fetch_model_hardware_stats():
                         block_size = sched.get("block_size", 64)
                         if max_blocks:
                             token_stats.set_context_limit(max_blocks * block_size)
-                        # Disk cache: SSM companion (has explicit budget)
-                        ssm = cache.get("ssm_companion", {}).get("disk", {})
-                        used = ssm.get("bytes", 0)
-                        budget = ssm.get("budget_bytes", 0)
-                        if budget:
+                        # Block disk cache size
+                        bdc = cache.get("block_disk_cache", {})
+                        used = bdc.get("disk_size_bytes", 0)
+                        # Budget comes from the CLI arg --block-disk-cache-max-gb
+                        budget_gb = _get_block_cache_budget_gb()
+                        if used or budget_gb:
                             token_stats.set_disk_cache(
                                 round(used / 1_000_000),
-                                round(budget / 1_000_000),
+                                budget_gb * 1000,
                             )
                     except Exception:
                         pass
