@@ -371,9 +371,11 @@ You have tools. To call one, output exactly:
 Stop after the closing tag and wait for the result before continuing.
 
 Tools:
-- read_file(path): Read a file's content
-- write_file(path, content): Write content to a file (creates or overwrites)
-- list_files(path): List directory contents
+- read_file(path): Read a file. path is relative to project root, e.g. "frontend/src/App.jsx"
+- write_file(path, content): Write content to a file (creates or overwrites). path relative to project root.
+- list_files(path): List a directory. path is relative to project root, e.g. "frontend/src". Use "" or "." for root. Examples:
+    list_files root:    <tool_call>{"name": "list_files", "args": {"path": "."}}</tool_call>
+    list_files subdir:  <tool_call>{"name": "list_files", "args": {"path": "frontend/src"}}</tool_call>
 - run_command(command): Run a shell command in the project root
 - git_status(): Show git status
 - git_diff(file?, staged?): Show git diff
@@ -434,18 +436,21 @@ async def _exec_tool(name: str, args: dict, root: str) -> tuple[str, Optional[st
             return f"Written: {path}", path
 
         elif name == "list_files":
-            path = _safe_path(root, args.get("path", root))
+            raw_path = args.get("path", ".")
+            target = root if raw_path in ("", ".", "/") else raw_path
+            path = _safe_path(root, target)
             if not path:
                 return "Error: path escapes project root", None
             p = Path(path)
             if not p.exists():
                 return f"Error: {path} not found", None
-            lines = []
+            rel = os.path.relpath(path, root)
+            lines = [f"Contents of {rel}:"]
             for item in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name)):
-                if item.name.startswith("."):
+                if item.name.startswith(".") and item.name not in (".env", ".gitignore"):
                     continue
-                lines.append(("[dir] " if item.is_dir() else "") + item.name)
-            return "\n".join(lines) or "(empty)", None
+                lines.append(("[dir] " if item.is_dir() else "      ") + item.name)
+            return "\n".join(lines) or f"{rel}: (empty)", None
 
         elif name == "run_command":
             cmd = args.get("command", "")
