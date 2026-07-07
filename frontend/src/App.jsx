@@ -528,13 +528,6 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         <ModelMenu modelState={modelState} onSleep={onSleep} onWake={onWake} onStop={onStop} />
       </div>
       <div
-        className={`sidebar-nav-item${view === 'plugins' ? ' active' : ''}`}
-        onClick={() => onViewChange(view === 'plugins' ? 'chat' : 'plugins')}
-      >
-        <span className="sidebar-nav-icon">⬡</span>
-        Plugins
-      </div>
-      <div
         className={`sidebar-nav-item${view === 'apps' || view === 'podcasts' || view === 'questions' ? ' active' : ''}`}
         onClick={() => onViewChange(view === 'apps' || view === 'podcasts' || view === 'questions' ? 'chat' : 'apps')}
       >
@@ -543,6 +536,13 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         {pendingQuestions > 0 && (
           <span className="sidebar-badge">{pendingQuestions}</span>
         )}
+      </div>
+      <div
+        className={`sidebar-nav-item${view === 'plugins' ? ' active' : ''}`}
+        onClick={() => onViewChange(view === 'plugins' ? 'chat' : 'plugins')}
+      >
+        <span className="sidebar-nav-icon">⬡</span>
+        Plugins
       </div>
       <div className="sidebar-divider" />
       <div className="session-list">
@@ -576,24 +576,39 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
   )
 }
 
+function IconPodcast() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="2"/>
+      <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/>
+    </svg>
+  )
+}
+
+function IconQuestions() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+      <line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+  )
+}
+
 const APPS_REGISTRY = [
-  { id: 'podcasts', icon: '📻', name: 'Podcasts', description: 'Track episodes and ingest transcripts for Cosmos to learn from.' },
-  { id: 'questions', icon: '❓', name: 'Questions', description: 'Questions Cosmos has parked for you to answer and resolve into memory.' },
+  { id: 'podcasts', Icon: IconPodcast, name: 'Podcasts', description: 'Track episodes and ingest transcripts for Cosmos to learn from.' },
+  { id: 'questions', Icon: IconQuestions, name: 'Questions', description: 'Questions Cosmos has parked for you to answer and resolve into memory.' },
 ]
 
 function AppsPage({ onOpen }) {
   return (
     <div className="apps-page">
-      <div className="apps-page-header">
-        <span className="apps-page-icon">⊞</span>
-        <h2>Apps</h2>
-      </div>
       <div className="apps-grid">
-        {APPS_REGISTRY.map(app => (
-          <div key={app.id} className="app-card" onClick={() => onOpen(app.id)}>
-            <span className="app-card-icon">{app.icon}</span>
-            <div className="app-card-name">{app.name}</div>
-            <div className="app-card-desc">{app.description}</div>
+        {APPS_REGISTRY.map(({ id, Icon, name, description }) => (
+          <div key={id} className="app-card" onClick={() => onOpen(id)}>
+            <div className="app-card-icon"><Icon /></div>
+            <div className="app-card-name">{name}</div>
+            <div className="app-card-desc">{description}</div>
           </div>
         ))}
       </div>
@@ -876,6 +891,7 @@ export default function App() {
       />
       <div className="app">
         <header className="header">
+          {(view === 'plugins' || view === 'apps') && <span className="header-title">{view === 'plugins' ? 'Plugins' : 'Apps'}</span>}
           <div className="header-right">
             <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">
               <IconSettings />
