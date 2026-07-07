@@ -59,6 +59,22 @@ async def list_projects():
     return _load_projects()
 
 
+@router.get("/pick-folder")
+async def pick_folder():
+    """Open a native macOS folder picker via AppleScript and return the selected path."""
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", 'POSIX path of (choose folder with prompt "Select project folder")'],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            return {"path": None, "cancelled": True}
+        path = result.stdout.strip().rstrip("/")
+        return {"path": path, "cancelled": False}
+    except Exception as e:
+        return {"error": str(e), "path": None}
+
+
 class ProjectIn(BaseModel):
     name: str
     path: str

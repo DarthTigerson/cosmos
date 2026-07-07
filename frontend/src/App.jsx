@@ -684,6 +684,20 @@ function IconGitBranch() {
 function CodeProjectModal({ projects, currentProject, onSelect, onAdd, onRemove, onClose }) {
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
+  const [picking, setPicking] = useState(false)
+
+  async function browse() {
+    setPicking(true)
+    try {
+      const res = await fetch('/code/pick-folder')
+      const data = await res.json()
+      if (data.path) {
+        setPath(data.path)
+        if (!name) setName(data.path.split('/').pop())
+      }
+    } catch {}
+    setPicking(false)
+  }
 
   function handleAdd() {
     if (!name.trim() || !path.trim()) return
@@ -720,8 +734,20 @@ function CodeProjectModal({ projects, currentProject, onSelect, onAdd, onRemove,
         </div>
         <div className="code-modal-add">
           <input className="code-modal-input" placeholder="Project name" value={name} onChange={e => setName(e.target.value)} />
-          <input className="code-modal-input" placeholder="/path/to/project" value={path} onChange={e => setPath(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()} />
-          <button className="code-modal-addbtn" onClick={handleAdd}>Add project</button>
+          <div className="code-modal-path-row">
+            <input
+              className="code-modal-input"
+              placeholder="/path/to/project"
+              value={path}
+              onChange={e => setPath(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+              style={{ flex: 1 }}
+            />
+            <button className="code-modal-browse" onClick={browse} disabled={picking} title="Browse in Finder">
+              {picking ? '…' : '⊞'}
+            </button>
+          </div>
+          <button className="code-modal-addbtn" onClick={handleAdd} disabled={!name.trim() || !path.trim()}>Add project</button>
         </div>
       </div>
     </div>

@@ -2788,6 +2788,29 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
 .code-modal-input:focus { border-color: var(--cosmos-accent); }
 .code-modal-input::placeholder { color: var(--text-dim); }
 
+.code-modal-path-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.code-modal-browse {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 16px;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.code-modal-browse:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.1); }
+.code-modal-browse:disabled { opacity: 0.5; cursor: wait; }
+
 .code-modal-addbtn {
   background: var(--cosmos-accent);
   border: none;
