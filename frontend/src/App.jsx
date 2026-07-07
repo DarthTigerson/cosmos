@@ -588,29 +588,15 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         <>
           <div className="sidebar-divider" />
           {codeProject ? (
-            <>
-              <div className="sidebar-code-info">
-                <span className="sidebar-code-name">{codeProject.name}</span>
-                {codeGitStatus?.branch && (
-                  <span className="sidebar-code-branch">
-                    <IconGitBranch /> {codeGitStatus.branch}
-                  </span>
-                )}
-              </div>
-              <div className="session-list" style={{ flex: 1 }}>
-                {!codeTree && <div className="session-empty">Loading…</div>}
-                {codeTree?.children?.map(node => (
-                  <SidebarFileNode
-                    key={node.path}
-                    node={node}
-                    onOpen={onCodeFileOpen}
-                    expandedDirs={codeExpandedDirs}
-                    onToggle={onCodeToggleDir}
-                    changedPaths={codeChangedPaths}
-                  />
-                ))}
-              </div>
-            </>
+            <CodeSidebarPanel
+              codeProject={codeProject}
+              codeTree={codeTree}
+              codeGitStatus={codeGitStatus}
+              codeExpandedDirs={codeExpandedDirs}
+              codeChangedPaths={codeChangedPaths}
+              onCodeFileOpen={onCodeFileOpen}
+              onCodeToggleDir={onCodeToggleDir}
+            />
           ) : (
             <div className="session-empty" style={{ padding: '16px 12px' }}>No project open.</div>
           )}
@@ -622,6 +608,67 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         </>
       )}
     </aside>
+  )
+}
+
+// ── Code sidebar panel (Files / Changes tabs) ────────────────────────────────
+
+const GIT_STATUS_LABELS = { M: 'M', A: 'A', D: 'D', '?': 'U', R: 'R', C: 'C' }
+const GIT_STATUS_COLORS = { M: '#d4895a', A: '#6db87a', D: '#c0392b', '?': '#888', R: '#7bafd4', C: '#a78bca' }
+
+function CodeSidebarPanel({ codeProject, codeTree, codeGitStatus, codeExpandedDirs, codeChangedPaths, onCodeFileOpen, onCodeToggleDir }) {
+  const [tab, setTab] = useState('files')
+  const changedFiles = codeGitStatus?.files || []
+
+  return (
+    <>
+      <div className="sidebar-code-info">
+        <span className="sidebar-code-name">{codeProject.name}</span>
+        {codeGitStatus?.branch && (
+          <span className="sidebar-code-branch">
+            <IconGitBranch /> {codeGitStatus.branch}
+          </span>
+        )}
+      </div>
+      <div className="code-sidebar-tabs">
+        <button className={`code-sidebar-tab${tab === 'files' ? ' active' : ''}`} onClick={() => setTab('files')}>Files</button>
+        <button className={`code-sidebar-tab${tab === 'changes' ? ' active' : ''}`} onClick={() => setTab('changes')}>
+          Changes{changedFiles.length > 0 && <span className="code-sidebar-tab-count">{changedFiles.length}</span>}
+        </button>
+      </div>
+      {tab === 'files' ? (
+        <div className="session-list" style={{ flex: 1 }}>
+          {!codeTree && <div className="session-empty">Loading…</div>}
+          {codeTree?.children?.map(node => (
+            <SidebarFileNode
+              key={node.path}
+              node={node}
+              onOpen={onCodeFileOpen}
+              expandedDirs={codeExpandedDirs}
+              onToggle={onCodeToggleDir}
+              changedPaths={codeChangedPaths}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="session-list" style={{ flex: 1 }}>
+          {changedFiles.length === 0 ? (
+            <div className="session-empty">No changes.</div>
+          ) : changedFiles.map(f => {
+            const st = f.status?.[0] || '?'
+            const fullPath = `${codeProject.path}/${f.file}`
+            return (
+              <div key={f.file} className="ftree-file git-change-row" onClick={() => onCodeFileOpen(fullPath)} title={f.file}>
+                <span className="git-change-status" style={{ color: GIT_STATUS_COLORS[st] || '#888' }}>
+                  {GIT_STATUS_LABELS[st] || st}
+                </span>
+                <span className="ftree-name">{f.file}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </>
   )
 }
 

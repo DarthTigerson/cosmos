@@ -271,6 +271,7 @@ function ChatPanel({ project, onFileWritten }) {
   const [loading, setLoading] = useState(false)
   const [mentionState, setMentionState] = useState(null) // { query, atIdx }
   const [mentionFiles, setMentionFiles] = useState([])
+  const mentionMap = useRef({}) // basename → relative path
   const abortRef = useRef(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -298,12 +299,14 @@ function ChatPanel({ project, onFileWritten }) {
   }, [messages])
 
   async function send() {
-    const text = input.trim()
-    if (!text || loading || !project) return
+    const raw = input.trim()
+    if (!raw || loading || !project) return
+    // Expand @basename → full relative path for the model
+    const text = raw.replace(/@([\w.\-/]+)/g, (match, name) => mentionMap.current[name] || match)
     setInput('')
     setMessages(m => [
       ...m,
-      { role: 'user', content: text },
+      { role: 'user', content: raw }, // show original @basename to user
       { role: 'assistant', content: '', thinking: null, toolCalls: [], fileWritten: [], streaming: true },
     ])
     setLoading(true)
@@ -404,15 +407,17 @@ function ChatPanel({ project, onFileWritten }) {
               query={mentionState.query}
               onSelect={f => {
                 const ta = inputRef.current
-                const cursor = ta?.selectionStart ?? input.length
+                const basename = f.split('/').pop()
+                mentionMap.current[basename] = f  // record for expansion on send
                 const before = input.slice(0, mentionState.atIdx)
                 const after = input.slice(mentionState.atIdx + 1 + mentionState.query.length)
-                const next = before + f + after
+                const inserted = basename  // display just the filename (@ is already in `before`)
+                const next = before + '@' + inserted + after
                 setInput(next)
                 setMentionState(null)
                 setTimeout(() => {
                   ta?.focus()
-                  const pos = mentionState.atIdx + f.length
+                  const pos = mentionState.atIdx + 1 + inserted.length
                   ta?.setSelectionRange(pos, pos)
                 }, 0)
               }}
@@ -455,6 +460,7 @@ function ChatPanel({ project, onFileWritten }) {
 const DEFAULT_FONT_SIZE = 13
 const MIN_FONT_SIZE = 9
 const MAX_FONT_SIZE = 30
+const LS_FONT_KEY = 'cosmos-code-font-size'
 
 export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRefreshTree }) {
   const [openFiles, setOpenFiles] = useState([])
@@ -462,15 +468,19 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
   const [diffMode, setDiffMode] = useState(false)
   const [originalContents, setOriginalContents] = useState({})
   const [terminalOpen, setTerminalOpen] = useState(false)
-  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const [fontSize, setFontSize] = useState(() => {
+    const s = localStorage.getItem(LS_FONT_KEY)
+    return s ? Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, parseInt(s, 10))) : DEFAULT_FONT_SIZE
+  })
   const editorRef = useRef(null)
-  const fontSizeRef = useRef(DEFAULT_FONT_SIZE)
+  const fontSizeRef = useRef(fontSize)
 
   function adjustFontSize(delta) {
     setFontSize(prev => {
       const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, prev + delta))
       fontSizeRef.current = next
       editorRef.current?.updateOptions({ fontSize: next })
+      localStorage.setItem(LS_FONT_KEY, next)
       return next
     })
   }
@@ -570,6 +580,7 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
         setFontSize(DEFAULT_FONT_SIZE)
         fontSizeRef.current = DEFAULT_FONT_SIZE
         editorRef.current?.updateOptions({ fontSize: DEFAULT_FONT_SIZE })
+        localStorage.setItem(LS_FONT_KEY, DEFAULT_FONT_SIZE)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -635,6 +646,7 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
                   setFontSize(DEFAULT_FONT_SIZE)
                   fontSizeRef.current = DEFAULT_FONT_SIZE
                   editor.updateOptions({ fontSize: DEFAULT_FONT_SIZE })
+                  localStorage.setItem(LS_FONT_KEY, DEFAULT_FONT_SIZE)
                 })
               }}
               options={{
