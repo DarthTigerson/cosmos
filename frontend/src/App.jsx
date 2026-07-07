@@ -528,6 +528,13 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         <ModelMenu modelState={modelState} onSleep={onSleep} onWake={onWake} onStop={onStop} />
       </div>
       <div
+        className={`sidebar-nav-item${view === 'chat' ? ' active' : ''}`}
+        onClick={() => onViewChange('chat')}
+      >
+        <span className="sidebar-nav-icon">◻</span>
+        Chat
+      </div>
+      <div
         className={`sidebar-nav-item${view === 'apps' || view === 'podcasts' || view === 'questions' ? ' active' : ''}`}
         onClick={() => onViewChange(view === 'apps' || view === 'podcasts' || view === 'questions' ? 'chat' : 'apps')}
       >
@@ -544,34 +551,38 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         <span className="sidebar-nav-icon">⬡</span>
         Plugins
       </div>
-      <div className="sidebar-divider" />
-      <div className="session-list">
-        {sessions.length === 0 && (
-          <div className="session-empty">No previous chats yet.</div>
-        )}
-        {sessions.map(s => (
-          <div
-            key={s.id}
-            className={`session-item${s.id === currentId ? ' active' : ''}`}
-            onClick={() => onSelect(s.id)}
-          >
-            <div className="session-title">{s.title}</div>
-            <div className="session-meta">{relativeDate(s.updated_at)}</div>
-            <button
-              className="session-delete"
-              onClick={e => { e.stopPropagation(); onDelete(s.id) }}
-              title="Delete"
-            >
-              ×
+      {view === 'chat' && (
+        <>
+          <div className="sidebar-divider" />
+          <div className="session-list">
+            {sessions.length === 0 && (
+              <div className="session-empty">No previous chats yet.</div>
+            )}
+            {sessions.map(s => (
+              <div
+                key={s.id}
+                className={`session-item${s.id === currentId ? ' active' : ''}`}
+                onClick={() => onSelect(s.id)}
+              >
+                <div className="session-title">{s.title}</div>
+                <div className="session-meta">{relativeDate(s.updated_at)}</div>
+                <button
+                  className="session-delete"
+                  onClick={e => { e.stopPropagation(); onDelete(s.id) }}
+                  title="Delete"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="sidebar-header">
+            <button className="new-chat-btn" onClick={onNew}>
+              <span>+</span> New chat
             </button>
           </div>
-        ))}
-      </div>
-      <div className="sidebar-header">
-        <button className="new-chat-btn" onClick={onNew}>
-          <span>+</span> New chat
-        </button>
-      </div>
+        </>
+      )}
     </aside>
   )
 }
