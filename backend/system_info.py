@@ -133,6 +133,72 @@ def get_battery() -> dict | None:
     }
 
 
+# ── Memory ────────────────────────────────────────────────────────────────────
+
+def get_memory() -> dict:
+    """Return RSS breakdown of Cosmos processes and total system RAM."""
+    total_bytes = 0
+    try:
+        total_bytes = int(subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, timeout=3
+        ).stdout.strip())
+    except Exception:
+        pass
+
+    model_bytes = 0
+    backend_bytes = 0
+    try:
+        out = subprocess.run(
+            ["ps", "ax", "-o", "rss=,command="],
+            capture_output=True, text=True, timeout=5
+        ).stdout
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) < 2:
+                continue
+            try:
+                rss_kb = int(parts[0])
+            except ValueError:
+                continue
+            cmd = parts[1]
+            if "vmlx_engine" in cmd:
+                model_bytes += rss_kb * 1024
+            elif "uvicorn" in cmd and "main:app" in cmd:
+                backend_bytes += rss_kb * 1024
+    except Exception:
+        pass
+
+    system_used_bytes = 0
+    try:
+        vm = subprocess.run(
+            ["vm_stat"], capture_output=True, text=True, timeout=3
+        ).stdout
+        page_size = 16384
+        m = re.search(r'page size of (\d+) bytes', vm)
+        if m:
+            page_size = int(m.group(1))
+
+        def _pages(label):
+            match = re.search(rf'{re.escape(label)}:\s+([\d]+)', vm)
+            return int(match.group(1)) if match else 0
+
+        anonymous = _pages("Anonymous pages")
+        wired = _pages("Pages wired down")
+        compressed = _pages("Pages occupied by compressor")
+        system_used_bytes = (anonymous + wired + compressed) * page_size
+    except Exception:
+        pass
+
+    return {
+        "cosmos_bytes": model_bytes + backend_bytes,
+        "model_bytes": model_bytes,
+        "backend_bytes": backend_bytes,
+        "system_used_bytes": system_used_bytes,
+        "total_bytes": total_bytes,
+    }
+
+
 # ── Network ────────────────────────────────────────────────────────────────────
 
 def get_network() -> dict:
@@ -155,7 +221,18 @@ def get_network() -> dict:
         except Exception:
             pass
 
-        return {"wifi": wifi_connected, "ssid": ssid}
+        ip = None
+        try:
+            ip_out = subprocess.run(
+                ["ipconfig", "getifaddr", "en0"],
+                capture_output=True, text=True, timeout=3
+            ).stdout.strip()
+            if ip_out:
+                ip = ip_out
+        except Exception:
+            pass
+
+        return {"wifi": wifi_connected, "ssid": ssid, "ip": ip}
     except Exception:
         pass
-    return {"wifi": False, "ssid": None}
+    return {"wifi": False, "ssid": None, "ip": None}

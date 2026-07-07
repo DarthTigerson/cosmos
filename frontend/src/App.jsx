@@ -54,16 +54,27 @@ function useNetwork() {
 
 function WifiWidget({ net }) {
   if (!net) return null
-  const { wifi, ssid } = net
-  const label = wifi ? (ssid ? `Wi-Fi · ${ssid}` : 'Wi-Fi · connected') : 'Wi-Fi · not connected'
+  const { wifi, ssid, ip } = net
   return (
-    <div className={`wifi-widget${wifi ? '' : ' wifi-widget--off'}`} title={label}>
+    <div className={`wifi-widget${wifi ? '' : ' wifi-widget--off'}`}>
       <svg width="18" height="14" viewBox="0 0 24 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M1.42 8a16 16 0 0 1 21.16 0"/>
         <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
         <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
         <circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/>
       </svg>
+      <div className="wifi-popover">
+        <div className="bpop-title">{ssid || (wifi ? 'Connected' : 'Not connected')}</div>
+        {ip && (
+          <>
+            <div className="bpop-divider"/>
+            <div className="bpop-row">
+              <span className="bpop-label">IP</span>
+              <span className="bpop-val">{ip}</span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -84,6 +95,79 @@ function useBattery() {
     return () => clearInterval(id)
   }, [])
   return battery
+}
+
+function useMemory() {
+  const [mem, setMem] = useState(null)
+  useEffect(() => {
+    async function fetch_() {
+      try {
+        const res = await fetch('/memory')
+        const data = await res.json()
+        if (data.total_bytes > 0) setMem(data)
+        else setMem(null)
+      } catch { setMem(null) }
+    }
+    fetch_()
+    const id = setInterval(fetch_, 10000)
+    return () => clearInterval(id)
+  }, [])
+  return mem
+}
+
+function fmtGB(bytes) {
+  return (bytes / 1073741824).toFixed(1)
+}
+
+function MemoryWidget({ mem }) {
+  if (!mem) return null
+  const sysUsed = fmtGB(mem.system_used_bytes)
+  const total = fmtGB(mem.total_bytes)
+  const cosmos = fmtGB(mem.cosmos_bytes)
+  const sysPct = mem.total_bytes > 0 ? Math.round((mem.system_used_bytes / mem.total_bytes) * 100) : 0
+  return (
+    <div className="memory-widget">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="6" width="20" height="12" rx="2"/>
+        <path d="M6 6V4M10 6V4M14 6V4M18 6V4M6 18v2M10 18v2M14 18v2M18 18v2"/>
+      </svg>
+      <span className="memory-text">{sysUsed} <span className="memory-sep">/</span> {total} GB</span>
+      <div className="memory-popover">
+        <div className="bpop-title">RAM · {sysPct}% used</div>
+        <div className="bpop-divider"/>
+        <div className="bpop-row">
+          <span className="bpop-label">System used</span>
+          <span className="bpop-val">{sysUsed} GB</span>
+        </div>
+        <div className="bpop-divider"/>
+        <div className="bpop-row">
+          <span className="bpop-label">Cosmos total</span>
+          <span className="bpop-val">{cosmos} GB</span>
+        </div>
+        {mem.model_bytes > 0 && (
+          <div className="bpop-row">
+            <span className="bpop-label bpop-indent">Model</span>
+            <span className="bpop-val">{fmtGB(mem.model_bytes)} GB</span>
+          </div>
+        )}
+        {mem.backend_bytes > 0 && (
+          <div className="bpop-row">
+            <span className="bpop-label bpop-indent">Backend</span>
+            <span className="bpop-val">{fmtGB(mem.backend_bytes)} GB</span>
+          </div>
+        )}
+        <div className="bpop-divider"/>
+        <div className="bpop-row">
+          <span className="bpop-label">Total used</span>
+          <span className="bpop-val">{sysUsed} GB</span>
+        </div>
+        <div className="bpop-row">
+          <span className="bpop-label">Total available</span>
+          <span className="bpop-val">{total} GB</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function useClock() {
@@ -401,6 +485,7 @@ export default function App() {
   const [pendingQuestions, setPendingQuestions] = useState(0)
   const battery = useBattery()
   const net = useNetwork()
+  const mem = useMemory()
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -628,6 +713,7 @@ export default function App() {
             <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">
               <IconSettings />
             </button>
+            <MemoryWidget mem={mem} />
             <WifiWidget net={net} />
             <BatteryWidget battery={battery} />
             <ClockWidget />

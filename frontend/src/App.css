@@ -270,6 +270,42 @@ body {
 }
 .settings-btn:hover { color: var(--cosmos-accent); background: var(--cosmos-accent-dim); }
 
+.memory-widget {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  cursor: default;
+  user-select: none;
+  position: relative;
+}
+.memory-text {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.memory-sep {
+  opacity: 0.45;
+}
+.memory-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 13px;
+  min-width: 200px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 200;
+  pointer-events: none;
+}
+.memory-widget:hover .memory-popover {
+  display: block;
+}
+
 .clock-widget {
   display: flex;
   flex-direction: column;
@@ -299,10 +335,29 @@ body {
   color: var(--battery-ok);
   cursor: default;
   user-select: none;
+  position: relative;
 }
 .wifi-widget--off {
   color: var(--text-dim);
   opacity: 0.45;
+}
+.wifi-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 13px;
+  min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 200;
+  pointer-events: none;
+  color: var(--text-dim);
+}
+.wifi-widget:hover .wifi-popover {
+  display: block;
 }
 
 .battery-widget {
@@ -367,6 +422,11 @@ body {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.bpop-indent {
+  padding-left: 10px;
+  opacity: 0.7;
+}
+
 .bpop-footer {
   font-size: 10px;
   color: var(--text-dim);

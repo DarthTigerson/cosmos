@@ -23,7 +23,7 @@ import podcasts_db
 import questions_db
 import follow_ups_db
 import consolidation
-from system_info import get_battery, get_network, _load_readings
+from system_info import get_battery, get_network, get_memory, _load_readings
 
 
 @asynccontextmanager
@@ -67,3 +67,8 @@ async def battery():
 @app.get("/network")
 async def network():
     return get_network()
+
+
+@app.get("/memory")
+async def memory():
+    return get_memory()
