@@ -673,6 +673,13 @@ async def code_chat_history(session_id: str):
     return {"history": [{"role": r["role"], "content": r["content"]} for r in rows]}
 
 
+@router.delete("/chat/history")
+async def clear_chat_history(session_id: str):
+    sessions_db.delete_session(session_id)
+    _code_histories.pop(session_id, None)
+    return {"cleared": True}
+
+
 @router.delete("/chat/{session_id}/generation")
 async def cancel_generation(session_id: str):
     if session_id in _gen_states:

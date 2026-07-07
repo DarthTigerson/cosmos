@@ -204,6 +204,46 @@ function CodeMessage({ msg }) {
   )
 }
 
+// ── Slash commands ────────────────────────────────────────────────────────────
+
+const SLASH_COMMANDS = [
+  { name: 'clear', description: 'Clear the current coding session history' },
+]
+
+function SlashCommandPicker({ query, onSelect, onClose }) {
+  const [idx, setIdx] = useState(0)
+  const filtered = SLASH_COMMANDS.filter(c =>
+    c.name.startsWith(query.toLowerCase())
+  )
+  useEffect(() => setIdx(0), [query])
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(i => Math.min(i + 1, filtered.length - 1)) }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx(i => Math.max(i - 1, 0)) }
+      else if (e.key === 'Enter' || e.key === 'Tab') {
+        if (filtered[idx]) { e.preventDefault(); e.stopPropagation(); onSelect(filtered[idx].name) }
+      } else if (e.key === 'Escape') { e.preventDefault(); onClose() }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [filtered, idx, onSelect, onClose])
+  if (!filtered.length) return null
+  return (
+    <div className="mention-picker">
+      {filtered.map((c, i) => (
+        <div
+          key={c.name}
+          className={`mention-item${i === idx ? ' active' : ''}`}
+          onMouseDown={e => { e.preventDefault(); onSelect(c.name) }}
+        >
+          <span className="mention-name">/{c.name}</span>
+          <span className="mention-dir">{c.description}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── @ file mention picker ─────────────────────────────────────────────────────
 
 function FileMentionPicker({ files, query, onSelect, onClose }) {
@@ -272,6 +312,7 @@ function ChatPanel({ project, onFileWritten }) {
   const [mentionState, setMentionState] = useState(null) // { query, atIdx }
   const [mentionFiles, setMentionFiles] = useState([])
   const mentionMap = useRef({}) // basename → relative path
+  const [slashQuery, setSlashQuery] = useState(null) // null = closed, string = open
   const abortRef = useRef(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -383,6 +424,15 @@ function ChatPanel({ project, onFileWritten }) {
     abortRef.current?.abort()
   }
 
+  async function runCommand(name) {
+    setInput('')
+    setSlashQuery(null)
+    if (name === 'clear') {
+      if (sessionId) await fetch(`/code/chat/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' }).catch(() => {})
+      setMessages([])
+    }
+  }
+
   return (
     <div className="code-chat">
       <div className="code-chat-header">
@@ -400,6 +450,15 @@ function ChatPanel({ project, onFileWritten }) {
         <div ref={bottomRef} />
       </div>
       <div className="code-chat-input-area" style={{ position: 'relative' }}>
+        {slashQuery !== null && (
+          <div className="mention-picker-wrap">
+            <SlashCommandPicker
+              query={slashQuery}
+              onSelect={runCommand}
+              onClose={() => setSlashQuery(null)}
+            />
+          </div>
+        )}
         {mentionState && (
           <div className="mention-picker-wrap">
             <FileMentionPicker
@@ -430,12 +489,20 @@ function ChatPanel({ project, onFileWritten }) {
           className="code-chat-input"
           value={input}
           onChange={e => {
-            setInput(e.target.value)
-            const m = getActiveMention(e.target.value, e.target.selectionStart)
+            const val = e.target.value
+            setInput(val)
+            // Slash command detection — only when input starts with /
+            if (val.startsWith('/') && !val.includes(' ')) {
+              setSlashQuery(val.slice(1))
+              setMentionState(null)
+              return
+            }
+            setSlashQuery(null)
+            const m = getActiveMention(val, e.target.selectionStart)
             setMentionState(m)
           }}
           onKeyDown={e => {
-            if (mentionState) return // picker handles Enter/Tab/Esc/arrows
+            if (slashQuery !== null || mentionState) return // pickers handle keys
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
           }}
           onSelect={e => {
