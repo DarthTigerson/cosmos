@@ -929,21 +929,27 @@ export default function App() {
   const refreshCodeTree = useCallback(async () => {
     if (!codeProject) return
     try {
-      const [tRes, gRes] = await Promise.all([
-        fetch(`/code/fs/tree?root=${encodeURIComponent(codeProject.path)}`),
-        fetch(`/code/git/status?root=${encodeURIComponent(codeProject.path)}`),
-      ])
-      setCodeTree(await tRes.json())
-      setCodeGitStatus(await gRes.json())
+      const res = await fetch(`/code/fs/tree?root=${encodeURIComponent(codeProject.path)}`)
+      setCodeTree(await res.json())
+    } catch {}
+  }, [codeProject])
+
+  const refreshCodeGitStatus = useCallback(async () => {
+    if (!codeProject) return
+    try {
+      const res = await fetch(`/code/git/status?root=${encodeURIComponent(codeProject.path)}`)
+      setCodeGitStatus(await res.json())
     } catch {}
   }, [codeProject])
 
   useEffect(() => {
     if (!codeProject) return
     refreshCodeTree()
-    const id = setInterval(refreshCodeTree, 15000)
-    return () => clearInterval(id)
-  }, [codeProject, refreshCodeTree])
+    refreshCodeGitStatus()
+    const treeId = setInterval(refreshCodeTree, 15000)
+    const gitId = setInterval(refreshCodeGitStatus, 3000)
+    return () => { clearInterval(treeId); clearInterval(gitId) }
+  }, [codeProject, refreshCodeTree, refreshCodeGitStatus])
 
   async function codeSelectProject(p) {
     setCodeProject(p)
@@ -1278,7 +1284,7 @@ export default function App() {
             project={codeProject}
             fileToOpen={codeFileToOpen}
             onFileToOpenHandled={() => setCodeFileToOpen(null)}
-            onRefreshTree={refreshCodeTree}
+            onRefreshTree={() => { refreshCodeTree(); refreshCodeGitStatus() }}
           />
         ) : (
           <>
