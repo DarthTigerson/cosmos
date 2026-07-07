@@ -317,13 +317,18 @@ async def terminal_ws(ws: WebSocket, cwd: str = "."):
                     except OSError:
                         break
                 elif msg.get("text"):
+                    text = msg["text"]
                     try:
-                        d = json.loads(msg["text"])
+                        d = json.loads(text)
                         if d.get("type") == "resize":
                             winsize = struct.pack("HHHH", d["rows"], d["cols"], 0, 0)
                             fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                    except Exception:
-                        pass
+                    except (json.JSONDecodeError, KeyError):
+                        # Regular keystrokes from xterm.js arrive as text frames
+                        try:
+                            os.write(master_fd, text.encode())
+                        except OSError:
+                            break
         except (WebSocketDisconnect, Exception) as e:
             log.debug("[terminal] ws recv ended: %s", e)
 
