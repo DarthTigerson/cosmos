@@ -36,6 +36,23 @@ function IconStop() {
   )
 }
 
+function useModelStatus() {
+  const [available, setAvailable] = useState(false)
+  useEffect(() => {
+    async function check() {
+      try {
+        const res = await fetch('/model/status', { signal: AbortSignal.timeout(2000) })
+        const data = await res.json()
+        setAvailable(!!data.available)
+      } catch { setAvailable(false) }
+    }
+    check()
+    const id = setInterval(check, 10000)
+    return () => clearInterval(id)
+  }, [])
+  return available
+}
+
 function useNetwork() {
   const [net, setNet] = useState(null)
   useEffect(() => {
@@ -481,8 +498,8 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [view, setView] = useState('chat')
-  const [connected, setConnected] = useState(false)
   const [pendingQuestions, setPendingQuestions] = useState(0)
+  const modelAvailable = useModelStatus()
   const battery = useBattery()
   const net = useNetwork()
   const mem = useMemory()
@@ -491,20 +508,6 @@ export default function App() {
   const abortRef = useRef(null)
 
   useEffect(() => { initSettings() }, [])
-
-  useEffect(() => {
-    async function checkHealth() {
-      try {
-        const res = await fetch('/health', { signal: AbortSignal.timeout(2500) })
-        setConnected(res.ok)
-      } catch {
-        setConnected(false)
-      }
-    }
-    checkHealth()
-    const id = setInterval(checkHealth, 5000)
-    return () => clearInterval(id)
-  }, [])
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -706,7 +709,7 @@ export default function App() {
       <div className="app">
         <header className="header">
           <div className="header-title">
-            <span className={`cosmos-glyph${loading ? ' fast' : connected ? ' slow' : ' offline'}`}>◈</span>
+            <span className={`cosmos-glyph${loading ? ' thinking' : modelAvailable ? ' idle' : ' down'}`}>◈</span>
             Cosmos
           </div>
           <div className="header-right">
@@ -734,7 +737,7 @@ export default function App() {
             <main className="messages">
               {messages.length === 0 && (
                 <div className="empty-state">
-                  <div className={`cosmos-glyph empty-glyph${loading ? ' fast' : connected ? ' slow' : ' offline'}`}>◈</div>
+                  <div className={`cosmos-glyph empty-glyph${loading ? ' thinking' : modelAvailable ? ' idle' : ' down'}`}>◈</div>
                   <p>Ready when you are.</p>
                 </div>
               )}

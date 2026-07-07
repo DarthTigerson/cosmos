@@ -72,3 +72,17 @@ async def network():
 @app.get("/memory")
 async def memory():
     return get_memory()
+
+
+@app.get("/model/status")
+async def model_status():
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("http://localhost:8080/health", timeout=1.5)
+            data = r.json()
+            backends = data.get("backends", [])
+            available = any(b.get("status") == "running" for b in backends)
+            return {"available": available}
+    except Exception:
+        return {"available": False}

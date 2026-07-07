@@ -222,23 +222,36 @@ body {
   color: var(--cosmos-accent);
   display: inline-block;
   line-height: 1;
-  text-shadow:
-    0 0 6px var(--cosmos-accent),
-    0 0 14px var(--cosmos-accent);
-  transition: opacity 0.4s;
+  transition: opacity 0.4s, text-shadow 0.4s;
 }
 
-.cosmos-glyph.slow {
-  animation: spin-weighted 5s linear infinite;
+.cosmos-glyph.idle {
+  animation: glow-pulse 3s ease-in-out infinite;
 }
 
-.cosmos-glyph.fast {
+.cosmos-glyph.thinking {
   animation: spin-weighted 1.6s linear infinite;
 }
 
-.cosmos-glyph.offline {
+.cosmos-glyph.down {
   opacity: 0.2;
+  color: var(--text-dim);
   text-shadow: none;
+  animation: none;
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    text-shadow:
+      0 0 4px var(--cosmos-accent),
+      0 0 10px var(--cosmos-accent);
+  }
+  50% {
+    text-shadow:
+      0 0 8px var(--cosmos-accent),
+      0 0 20px var(--cosmos-accent),
+      0 0 36px var(--cosmos-accent);
+  }
 }
 
 .header-sub {
