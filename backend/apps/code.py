@@ -359,14 +359,33 @@ Tools:
 - git_push(): Push commits to remote"""
 
 
+def _read_claude_md(root: str) -> str:
+    for candidate in [
+        os.path.join(root, "CLAUDE.md"),
+        os.path.join(root, ".claude", "CLAUDE.md"),
+    ]:
+        if os.path.isfile(candidate):
+            try:
+                return Path(candidate).read_text()[:10000]
+            except Exception:
+                pass
+    return ""
+
+
 def _build_system(project_root: str, project_name: str, branch: str) -> str:
+    claude_md = _read_claude_md(project_root)
+    project_instructions = (
+        f"\n\nProject instructions (from CLAUDE.md):\n{claude_md}"
+        if claude_md else ""
+    )
     return (
         f"You are Cosmos, a coding assistant working in the {project_name} project.\n\n"
         f"Project root: {project_root}\n"
         f"Current branch: {branch or 'unknown'}\n\n"
-        "Use your tools to do real work. When making code changes: read relevant files first, "
-        "write complete implementations, be concise in explanations.\n"
-        "File writes appear in the editor immediately." + _TOOL_PROMPT
+        "You have full access to the repository via your tools. When starting a task, "
+        "use list_files and read_file to understand the codebase. "
+        "Write complete, working implementations. File writes appear in the editor immediately."
+        f"{project_instructions}{_TOOL_PROMPT}"
     )
 
 

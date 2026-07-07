@@ -336,12 +336,28 @@ function ChatPanel({ project, onFileWritten }) {
 
 // ── Main Code app (editor + chat, no file tree — that lives in sidebar) ───────
 
+const DEFAULT_FONT_SIZE = 13
+const MIN_FONT_SIZE = 9
+const MAX_FONT_SIZE = 30
+
 export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRefreshTree }) {
   const [openFiles, setOpenFiles] = useState([])
   const [activeFilePath, setActiveFilePath] = useState(null)
   const [diffMode, setDiffMode] = useState(false)
   const [originalContents, setOriginalContents] = useState({})
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const editorRef = useRef(null)
+  const fontSizeRef = useRef(DEFAULT_FONT_SIZE)
+
+  function adjustFontSize(delta) {
+    setFontSize(prev => {
+      const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, prev + delta))
+      fontSizeRef.current = next
+      editorRef.current?.updateOptions({ fontSize: next })
+      return next
+    })
+  }
 
   const activeFile = openFiles.find(f => f.path === activeFilePath)
 
@@ -418,12 +434,26 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
     onRefreshTree?.()
   }, [project, onRefreshTree])
 
-  // Ctrl/Cmd+S to save
+  // Ctrl/Cmd+S, Cmd+=/-, Cmd+0
   useEffect(() => {
     function handleKeyDown(e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 's' && activeFilePath) {
         e.preventDefault()
         saveFile(activeFilePath)
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        adjustFontSize(1)
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault()
+        adjustFontSize(-1)
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault()
+        setFontSize(DEFAULT_FONT_SIZE)
+        fontSizeRef.current = DEFAULT_FONT_SIZE
+        editorRef.current?.updateOptions({ fontSize: DEFAULT_FONT_SIZE })
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -450,6 +480,9 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
             )
           })}
           <div className="code-tabs-actions">
+            <button className="code-tabs-action code-zoom-btn" onClick={() => adjustFontSize(-1)} title="Zoom out (⌘-)">−</button>
+            <span className="code-zoom-size">{fontSize}</span>
+            <button className="code-tabs-action code-zoom-btn" onClick={() => adjustFontSize(1)} title="Zoom in (⌘+)">+</button>
             <button
               className={`code-tabs-action${diffMode ? ' active' : ''}`}
               onClick={toggleDiff}
@@ -478,9 +511,19 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
               onChange={val => updateFileContent(activeFilePath, val ?? '')}
               theme="vs-dark"
               height="100%"
+              onMount={(editor, monaco) => {
+                editorRef.current = editor
+                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Equal, () => adjustFontSize(1))
+                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Minus, () => adjustFontSize(-1))
+                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit0, () => {
+                  setFontSize(DEFAULT_FONT_SIZE)
+                  fontSizeRef.current = DEFAULT_FONT_SIZE
+                  editor.updateOptions({ fontSize: DEFAULT_FONT_SIZE })
+                })
+              }}
               options={{
                 minimap: { enabled: false },
-                fontSize: 13,
+                fontSize,
                 lineHeight: 20,
                 fontFamily: '"Menlo", "Monaco", "Courier New", monospace',
                 wordWrap: 'off',
@@ -501,7 +544,7 @@ export default function CodeApp({ project, fileToOpen, onFileToOpenHandled, onRe
               height="100%"
               options={{
                 minimap: { enabled: false },
-                fontSize: 13,
+                fontSize,
                 lineHeight: 20,
                 fontFamily: '"Menlo", "Monaco", "Courier New", monospace',
                 renderSideBySide: true,
