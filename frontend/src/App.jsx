@@ -413,9 +413,13 @@ function Message({ msg, isLast, onRegenerate, loading }) {
   )
 }
 
-function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions }) {
+function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions, glyphClass }) {
   return (
     <aside className="sidebar">
+      <div className="sidebar-brand">
+        <span className={`cosmos-glyph ${glyphClass}`}>◈</span>
+        <span className="sidebar-brand-name">Cosmos</span>
+      </div>
       <div
         className={`sidebar-nav-item${view === 'plugins' ? ' active' : ''}`}
         onClick={() => onViewChange(view === 'plugins' ? 'chat' : 'plugins')}
@@ -536,13 +540,20 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  function abortStream() {
+  // Close the SSE client only — backend generation keeps running
+  function disconnectStream() {
     abortRef.current?.abort()
     abortRef.current = null
   }
 
+  // Stop button: cancel backend task AND close SSE client
+  function stopGeneration() {
+    fetch(`/sessions/${sessionId}/generation`, { method: 'DELETE' }).catch(() => {})
+    disconnectStream()
+  }
+
   async function selectSession(id) {
-    abortStream()
+    disconnectStream()
     try {
       const res = await fetch(`/sessions/${id}/history`)
       const data = await res.json()
@@ -553,11 +564,15 @@ export default function App() {
         thinking: m.thinking || null,
         toolCalls: m.tool_calls || null,
       })))
+      // Reconnect if a generation is still running for this session
+      const activeRes = await fetch(`/sessions/${id}/active`)
+      const activeData = await activeRes.json()
+      if (activeData.active) resume(id)
     } catch {}
   }
 
   function newChat() {
-    abortStream()
+    disconnectStream()
     setSessionId(newSessionId())
     setMessages([])
     inputRef.current?.focus()
@@ -567,6 +582,42 @@ export default function App() {
     await fetch(`/sessions/${id}`, { method: 'DELETE' })
     if (id === sessionId) newChat()
     fetchSessions()
+  }
+
+  async function resume(id) {
+    setMessages(m => [...m, { role: 'assistant', content: '', thinking: null, toolCalls: [], streaming: true }])
+    setLoading(true)
+    abortRef.current = new AbortController()
+    try {
+      const res = await fetch(`/sessions/${id}/stream`, { signal: abortRef.current.signal })
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = '', thinking = '', content = '', toolCalls = []
+      outer: while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n'); buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6))
+            if (evt.error || evt.done) break outer
+            if (evt.reasoning_delta) { thinking += evt.reasoning_delta; setMessages(m => [...m.slice(0, -1), { role: 'assistant', content, thinking, toolCalls, streaming: true, streamingThinking: true }]); await Promise.resolve() }
+            if (evt.tool_call) { toolCalls = [...toolCalls, { name: evt.tool_call.name, args: evt.tool_call.args, result: null }]; setMessages(m => [...m.slice(0, -1), { role: 'assistant', content, thinking: thinking || null, toolCalls, streaming: true, streamingThinking: false }]); await Promise.resolve() }
+            if (evt.tool_result) { toolCalls = toolCalls.map(c => c.name === evt.tool_result.name && c.result === null ? { ...c, result: evt.tool_result.output } : c); setMessages(m => [...m.slice(0, -1), { role: 'assistant', content, thinking: thinking || null, toolCalls, streaming: true, streamingThinking: false }]); await Promise.resolve() }
+            if (evt.delta) { content += evt.delta; setMessages(m => [...m.slice(0, -1), { role: 'assistant', content, thinking: thinking || null, toolCalls, streaming: true, streamingThinking: false }]); await Promise.resolve() }
+          } catch { break outer }
+        }
+      }
+    } catch (e) {
+      if (e?.name !== 'AbortError') setMessages(m => m.slice(0, -1))
+    } finally {
+      abortRef.current = null
+      setLoading(false)
+      setMessages(m => { const last = m[m.length - 1]; return last?.role === 'assistant' ? [...m.slice(0, -1), { ...last, streaming: false }] : m })
+      fetchSessions()
+    }
   }
 
   async function send(overrideText) {
@@ -705,13 +756,10 @@ export default function App() {
         view={view}
         onViewChange={setView}
         pendingQuestions={pendingQuestions}
+        glyphClass={loading ? 'thinking' : modelAvailable ? 'idle' : 'down'}
       />
       <div className="app">
         <header className="header">
-          <div className="header-title">
-            <span className={`cosmos-glyph${loading ? ' thinking' : modelAvailable ? ' idle' : ' down'}`}>◈</span>
-            Cosmos
-          </div>
           <div className="header-right">
             <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">
               <IconSettings />
@@ -765,7 +813,7 @@ export default function App() {
                 disabled={loading}
               />
               {loading
-                ? <button className="send-btn stop-btn" onClick={abortStream} title="Stop"><IconStop /></button>
+                ? <button className="send-btn stop-btn" onClick={stopGeneration} title="Stop"><IconStop /></button>
                 : <button className="send-btn" onClick={send} disabled={!input.trim()} title="Send"><IconSend /></button>
               }
             </footer>
