@@ -204,14 +204,83 @@ function CodeMessage({ msg }) {
   )
 }
 
+// ── @ file mention picker ─────────────────────────────────────────────────────
+
+function FileMentionPicker({ files, query, onSelect, onClose }) {
+  const [idx, setIdx] = useState(0)
+  const listRef = useRef(null)
+
+  const filtered = query === ''
+    ? files.slice(0, 12)
+    : files.filter(f => f.toLowerCase().includes(query.toLowerCase())).slice(0, 12)
+
+  useEffect(() => setIdx(0), [query])
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(i => Math.min(i + 1, filtered.length - 1)) }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx(i => Math.max(i - 1, 0)) }
+      else if (e.key === 'Enter' || e.key === 'Tab') {
+        if (filtered[idx]) { e.preventDefault(); e.stopPropagation(); onSelect(filtered[idx]) }
+      } else if (e.key === 'Escape') { e.preventDefault(); onClose() }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [filtered, idx, onSelect, onClose])
+
+  useEffect(() => {
+    const el = listRef.current?.children[idx]
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [idx])
+
+  if (!filtered.length) return null
+
+  return (
+    <div className="mention-picker" ref={listRef}>
+      {filtered.map((f, i) => {
+        const name = f.split('/').pop()
+        const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/') + 1) : ''
+        return (
+          <div
+            key={f}
+            className={`mention-item${i === idx ? ' active' : ''}`}
+            onMouseDown={e => { e.preventDefault(); onSelect(f) }}
+          >
+            <span className="mention-name">{name}</span>
+            {dir && <span className="mention-dir">{dir}</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function getActiveMention(text, cursor) {
+  const before = text.slice(0, cursor)
+  // Match @ at start or after whitespace, followed by non-whitespace chars up to cursor
+  const match = before.match(/(^|[\s])@([^\s]*)$/)
+  if (!match) return null
+  const query = match[2]
+  const atIdx = before.lastIndexOf('@')
+  return { query, atIdx }
+}
+
 function ChatPanel({ project, onFileWritten }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [mentionState, setMentionState] = useState(null) // { query, atIdx }
+  const [mentionFiles, setMentionFiles] = useState([])
   const abortRef = useRef(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const sessionId = project ? `code:${project.path}` : null
+
+  useEffect(() => {
+    if (!project) return
+    fetch(`/code/fs/files?root=${encodeURIComponent(project.path)}`)
+      .then(r => r.json()).then(d => setMentionFiles(d.files || [])).catch(() => {})
+  }, [project])
 
   useEffect(() => {
     if (!sessionId) return
@@ -327,14 +396,48 @@ function ChatPanel({ project, onFileWritten }) {
         {messages.map((m, i) => <CodeMessage key={i} msg={m} />)}
         <div ref={bottomRef} />
       </div>
-      <div className="code-chat-input-area">
+      <div className="code-chat-input-area" style={{ position: 'relative' }}>
+        {mentionState && (
+          <div className="mention-picker-wrap">
+            <FileMentionPicker
+              files={mentionFiles}
+              query={mentionState.query}
+              onSelect={f => {
+                const ta = inputRef.current
+                const cursor = ta?.selectionStart ?? input.length
+                const before = input.slice(0, mentionState.atIdx)
+                const after = input.slice(mentionState.atIdx + 1 + mentionState.query.length)
+                const next = before + f + after
+                setInput(next)
+                setMentionState(null)
+                setTimeout(() => {
+                  ta?.focus()
+                  const pos = mentionState.atIdx + f.length
+                  ta?.setSelectionRange(pos, pos)
+                }, 0)
+              }}
+              onClose={() => setMentionState(null)}
+            />
+          </div>
+        )}
         <textarea
           ref={inputRef}
           className="code-chat-input"
           value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-          placeholder={project ? 'Ask Cosmos…' : 'Open a project first'}
+          onChange={e => {
+            setInput(e.target.value)
+            const m = getActiveMention(e.target.value, e.target.selectionStart)
+            setMentionState(m)
+          }}
+          onKeyDown={e => {
+            if (mentionState) return // picker handles Enter/Tab/Esc/arrows
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+          }}
+          onSelect={e => {
+            const m = getActiveMention(e.target.value, e.target.selectionStart)
+            setMentionState(m)
+          }}
+          placeholder={project ? 'Ask Cosmos… (type @ to mention a file)' : 'Open a project first'}
           rows={1}
           disabled={!project || loading}
         />

@@ -2625,6 +2625,38 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
   font-family: monospace;
 }
 
+.mention-picker-wrap {
+  position: absolute;
+  bottom: 100%;
+  left: 10px;
+  right: 46px;
+  z-index: 200;
+  margin-bottom: 4px;
+}
+.mention-picker {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.mention-item:hover, .mention-item.active {
+  background: rgba(255,255,255,0.06);
+}
+.mention-item.active { background: var(--cosmos-accent-dim); }
+.mention-name { color: var(--text); font-weight: 500; flex-shrink: 0; }
+.mention-dir { color: var(--text-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .code-chat-input-area {
   display: flex;
   align-items: flex-end;

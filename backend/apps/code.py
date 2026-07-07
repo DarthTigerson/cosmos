@@ -144,6 +144,24 @@ def _safe_path(project_root: str, path: str) -> Optional[str]:
     return None
 
 
+@router.get("/fs/files")
+async def file_list(root: str):
+    """Flat sorted list of all file paths relative to project root, for @ mention picker."""
+    root = os.path.realpath(root)
+    if not os.path.isdir(root):
+        return {"files": []}
+    _IGNORE = {'.git', 'node_modules', '__pycache__', '.DS_Store', 'dist', 'build',
+               '.next', '.venv', 'venv', '.mypy_cache', '.ruff_cache', '.pytest_cache'}
+    results = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _IGNORE and not d.startswith('.')]
+        for fname in filenames:
+            rel = os.path.relpath(os.path.join(dirpath, fname), root)
+            results.append(rel)
+    results.sort()
+    return {"files": results}
+
+
 @router.get("/fs/tree")
 async def file_tree(root: str):
     tree = _build_tree(root)
