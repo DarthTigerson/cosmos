@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // SSE stream needs special handling to disable compression
+      // SSE streams need special handling to disable compression
       '/chat/stream': {
         target: 'http://localhost:8002',
         changeOrigin: true,
@@ -17,8 +17,18 @@ export default defineConfig({
           })
         },
       },
+      '/code/chat/stream': {
+        target: 'http://localhost:8002',
+        changeOrigin: true,
+        selfHandleResponse: false,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('accept-encoding', 'identity')
+          })
+        },
+      },
       // Everything else that isn't a static asset goes to the backend
-      '^/(chat|sessions|podcasts|episodes|questions|health|memory|battery|network|model)': {
+      '^/(chat|sessions|podcasts|episodes|questions|health|memory|battery|network|model|code)': {
         target: 'http://localhost:8002',
         changeOrigin: true,
       },

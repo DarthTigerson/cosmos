@@ -4,6 +4,7 @@ import Settings, { initSettings } from './Settings.jsx'
 import PluginsPage, { getEnabledPluginIds } from './Plugins.jsx'
 import PodcastApp from './PodcastApp.jsx'
 import QuestionsApp from './QuestionsApp.jsx'
+import CodeApp from './CodeApp.jsx'
 import './App.css'
 
 function newSessionId() {
@@ -519,7 +520,7 @@ function ModelMenu({ modelState, onSleep, onWake, onStop }) {
   )
 }
 
-function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions, glyphClass, modelState, onSleep, onWake, onStop }) {
+function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions, glyphClass, modelState, onSleep, onWake, onStop, codeProject, codeTree, codeExpandedDirs, codeGitStatus, codeChangedPaths, onCodeFileOpen, onCodeToggleDir, onCodeChangeProject }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -535,8 +536,8 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
         Chat
       </div>
       <div
-        className={`sidebar-nav-item${view === 'apps' || view === 'podcasts' || view === 'questions' ? ' active' : ''}`}
-        onClick={() => onViewChange(view === 'apps' || view === 'podcasts' || view === 'questions' ? 'chat' : 'apps')}
+        className={`sidebar-nav-item${view === 'apps' || view === 'podcasts' || view === 'questions' || view === 'code' ? ' active' : ''}`}
+        onClick={() => onViewChange(view === 'apps' || view === 'podcasts' || view === 'questions' || view === 'code' ? 'chat' : 'apps')}
       >
         <span className="sidebar-nav-icon">⊞</span>
         Apps
@@ -583,7 +584,147 @@ function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewC
           </div>
         </>
       )}
+      {view === 'code' && (
+        <>
+          <div className="sidebar-divider" />
+          {codeProject ? (
+            <>
+              <div className="sidebar-code-info">
+                <span className="sidebar-code-name">{codeProject.name}</span>
+                {codeGitStatus?.branch && (
+                  <span className="sidebar-code-branch">
+                    <IconGitBranch /> {codeGitStatus.branch}
+                  </span>
+                )}
+              </div>
+              <div className="session-list" style={{ flex: 1 }}>
+                {!codeTree && <div className="session-empty">Loading…</div>}
+                {codeTree?.children?.map(node => (
+                  <SidebarFileNode
+                    key={node.path}
+                    node={node}
+                    onOpen={onCodeFileOpen}
+                    expandedDirs={codeExpandedDirs}
+                    onToggle={onCodeToggleDir}
+                    changedPaths={codeChangedPaths}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="session-empty" style={{ padding: '16px 12px' }}>No project open.</div>
+          )}
+          <div className="sidebar-header">
+            <button className="new-chat-btn" onClick={onCodeChangeProject}>
+              <span>⊞</span> {codeProject ? 'Change project' : 'Open project'}
+            </button>
+          </div>
+        </>
+      )}
     </aside>
+  )
+}
+
+// ── Code file tree helpers ────────────────────────────────────────────────────
+
+function SidebarFileNode({ node, onOpen, expandedDirs, onToggle, changedPaths, depth = 0 }) {
+  const isOpen = expandedDirs.has(node.path)
+  const isModified = changedPaths?.has(node.path)
+
+  if (node.type === 'file') {
+    return (
+      <div
+        className={`ftree-file${isModified ? ' ftree-modified' : ''}`}
+        style={{ paddingLeft: 10 + depth * 12 }}
+        onClick={() => onOpen(node.path)}
+        title={node.path}
+      >
+        <span className="ftree-name">{node.name}</span>
+        {isModified && <span className="ftree-dot" />}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div
+        className="ftree-dir"
+        style={{ paddingLeft: 6 + depth * 12 }}
+        onClick={() => onToggle(node.path)}
+      >
+        <span className="ftree-chevron" style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.12s', display: 'inline-block', fontSize: 9, marginRight: 3 }}>›</span>
+        <span className="ftree-name">{node.name}</span>
+      </div>
+      {isOpen && node.children?.map(child => (
+        <SidebarFileNode
+          key={child.path}
+          node={child}
+          onOpen={onOpen}
+          expandedDirs={expandedDirs}
+          onToggle={onToggle}
+          changedPaths={changedPaths}
+          depth={depth + 1}
+        />
+      ))}
+    </div>
+  )
+}
+
+function IconGitBranch() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="3" x2="6" y2="15"/>
+      <circle cx="18" cy="6" r="3"/>
+      <circle cx="6" cy="18" r="3"/>
+      <path d="M18 9a9 9 0 0 1-9 9"/>
+    </svg>
+  )
+}
+
+function CodeProjectModal({ projects, currentProject, onSelect, onAdd, onRemove, onClose }) {
+  const [name, setName] = useState('')
+  const [path, setPath] = useState('')
+
+  function handleAdd() {
+    if (!name.trim() || !path.trim()) return
+    onAdd(name.trim(), path.trim())
+    setName('')
+    setPath('')
+  }
+
+  return (
+    <div className="code-modal-overlay" onClick={onClose}>
+      <div className="code-modal" onClick={e => e.stopPropagation()}>
+        <div className="code-modal-header">
+          <span className="code-modal-title">Projects</span>
+          <button className="code-modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="code-modal-projects">
+          {projects.length === 0 && (
+            <div className="code-modal-empty">No projects yet. Add one below.</div>
+          )}
+          {projects.map((p, i) => (
+            <div
+              key={i}
+              className={`code-modal-project${currentProject?.path === p.path ? ' active' : ''}`}
+              onClick={() => onSelect(p)}
+            >
+              <div className="code-modal-pname">{p.name}</div>
+              <div className="code-modal-ppath">{p.path}</div>
+              <button
+                className="code-modal-premove"
+                onClick={e => { e.stopPropagation(); onRemove(i) }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+        <div className="code-modal-add">
+          <input className="code-modal-input" placeholder="Project name" value={name} onChange={e => setName(e.target.value)} />
+          <input className="code-modal-input" placeholder="/path/to/project" value={path} onChange={e => setPath(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()} />
+          <button className="code-modal-addbtn" onClick={handleAdd}>Add project</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -606,9 +747,19 @@ function IconQuestions() {
   )
 }
 
+function IconCode() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 18 22 12 16 6"/>
+      <polyline points="8 6 2 12 8 18"/>
+    </svg>
+  )
+}
+
 const APPS_REGISTRY = [
   { id: 'podcasts', Icon: IconPodcast, name: 'Podcasts', description: 'Track episodes and ingest transcripts for Cosmos to learn from.' },
   { id: 'questions', Icon: IconQuestions, name: 'Questions', description: 'Questions Cosmos has parked for you to answer and resolve into memory.' },
+  { id: 'code', Icon: IconCode, name: 'Code', description: 'Code alongside Cosmos — file tree, editor, terminal, and git in one place.' },
 ]
 
 function AppsPage({ onOpen }) {
@@ -644,12 +795,84 @@ export default function App() {
   const inputRef = useRef(null)
   const abortRef = useRef(null)
 
+  // ── Code state ──────────────────────────────────────────────────────────────
+  const [codeProjects, setCodeProjects] = useState([])
+  const [codeProject, setCodeProject] = useState(null)
+  const [codeTree, setCodeTree] = useState(null)
+  const [codeExpandedDirs, setCodeExpandedDirs] = useState(new Set())
+  const [codeGitStatus, setCodeGitStatus] = useState(null)
+  const [codeShowModal, setCodeShowModal] = useState(false)
+  const [codeFileToOpen, setCodeFileToOpen] = useState(null)
+
+  useEffect(() => {
+    fetch('/code/projects').then(r => r.json()).then(setCodeProjects).catch(() => {})
+  }, [])
+
+  const refreshCodeTree = useCallback(async () => {
+    if (!codeProject) return
+    try {
+      const [tRes, gRes] = await Promise.all([
+        fetch(`/code/fs/tree?root=${encodeURIComponent(codeProject.path)}`),
+        fetch(`/code/git/status?root=${encodeURIComponent(codeProject.path)}`),
+      ])
+      setCodeTree(await tRes.json())
+      setCodeGitStatus(await gRes.json())
+    } catch {}
+  }, [codeProject])
+
+  useEffect(() => {
+    if (!codeProject) return
+    refreshCodeTree()
+    const id = setInterval(refreshCodeTree, 15000)
+    return () => clearInterval(id)
+  }, [codeProject, refreshCodeTree])
+
+  async function codeSelectProject(p) {
+    setCodeProject(p)
+    setCodeShowModal(false)
+    setCodeTree(null)
+    setCodeGitStatus(null)
+    setCodeExpandedDirs(new Set([p.path]))
+  }
+
+  async function codeAddProject(name, path) {
+    await fetch('/code/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, path }),
+    })
+    const list = await fetch('/code/projects').then(r => r.json())
+    setCodeProjects(list)
+  }
+
+  async function codeRemoveProject(idx) {
+    await fetch(`/code/projects/${idx}`, { method: 'DELETE' })
+    const list = await fetch('/code/projects').then(r => r.json())
+    setCodeProjects(list)
+    if (codeProject && !list.find(p => p.path === codeProject.path)) {
+      setCodeProject(null)
+    }
+  }
+
+  function codeToggleDir(path) {
+    setCodeExpandedDirs(s => {
+      const next = new Set(s)
+      next.has(path) ? next.delete(path) : next.add(path)
+      return next
+    })
+  }
+
+  const codeChangedPaths = new Set(
+    (codeGitStatus?.files || []).map(f => `${codeProject?.path}/${f.file}`)
+  )
+
   useEffect(() => { initSettings() }, [])
 
   const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch('/sessions')
-      setSessions(await res.json())
+      const all = await res.json()
+      setSessions(all.filter(s => !s.id.startsWith('code:')))
     } catch {}
   }, [])
 
@@ -899,10 +1122,19 @@ export default function App() {
         onSleep={sleepModel}
         onWake={wakeModel}
         onStop={stopModel}
+        codeProject={codeProject}
+        codeTree={codeTree}
+        codeExpandedDirs={codeExpandedDirs}
+        codeGitStatus={codeGitStatus}
+        codeChangedPaths={codeChangedPaths}
+        onCodeFileOpen={path => setCodeFileToOpen(path)}
+        onCodeToggleDir={codeToggleDir}
+        onCodeChangeProject={() => setCodeShowModal(true)}
       />
       <div className="app">
         <header className="header">
           {(view === 'plugins' || view === 'apps') && <span className="header-title">{view === 'plugins' ? 'Plugins' : 'Apps'}</span>}
+          {view === 'code' && <span className="header-title">Code</span>}
           <div className="header-right">
             <button className="settings-btn" onClick={() => setShowSettings(true)} title="Settings">
               <IconSettings />
@@ -923,6 +1155,13 @@ export default function App() {
           <PodcastApp onBack={() => setView('apps')} />
         ) : view === 'questions' ? (
           <QuestionsApp onBack={() => setView('apps')} />
+        ) : view === 'code' ? (
+          <CodeApp
+            project={codeProject}
+            fileToOpen={codeFileToOpen}
+            onFileToOpenHandled={() => setCodeFileToOpen(null)}
+            onRefreshTree={refreshCodeTree}
+          />
         ) : (
           <>
             <main className="messages">
@@ -961,6 +1200,16 @@ export default function App() {
           </>
         )}
       </div>
+      {codeShowModal && (
+        <CodeProjectModal
+          projects={codeProjects}
+          currentProject={codeProject}
+          onSelect={codeSelectProject}
+          onAdd={codeAddProject}
+          onRemove={codeRemoveProject}
+          onClose={() => setCodeShowModal(false)}
+        />
+      )}
     </div>
   )
 }

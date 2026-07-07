@@ -17,6 +17,7 @@ from db import migrate_legacy
 from chat import router as chat_router
 from apps.podcasts import router as podcasts_router
 from apps.questions import router as questions_router
+from apps.code import router as code_router
 from memory import init_memory
 from sessions_db import init_db
 import podcasts_db
@@ -52,6 +53,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(podcasts_router)
 app.include_router(questions_router)
+app.include_router(code_router)
 
 
 @app.get("/health")
