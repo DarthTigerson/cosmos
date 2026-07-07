@@ -554,6 +554,7 @@ export default function App() {
 
   async function selectSession(id) {
     disconnectStream()
+    setView('chat')
     try {
       const res = await fetch(`/sessions/${id}/history`)
       const data = await res.json()
@@ -749,7 +750,7 @@ export default function App() {
     <div className="layout">
       <Sidebar
         sessions={sessions}
-        currentId={sessionId}
+        currentId={view === 'chat' ? sessionId : null}
         onSelect={selectSession}
         onNew={newChat}
         onDelete={deleteSession}
