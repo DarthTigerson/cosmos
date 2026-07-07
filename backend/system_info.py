@@ -135,8 +135,25 @@ def get_battery() -> dict | None:
 
 # ── Memory ────────────────────────────────────────────────────────────────────
 
+import ctypes
+import ctypes.util
+
+_libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+
+def _phys_footprint(pid: int) -> int | None:
+    # proc_pid_rusage with RUSAGE_INFO_V4 returns ri_phys_footprint at offset 72,
+    # which matches Activity Monitor's "Memory" column (includes Metal/GPU pages).
+    try:
+        buf = ctypes.create_string_buffer(1024)
+        if _libc.proc_pid_rusage(pid, 4, buf) == 0:
+            return int.from_bytes(buf.raw[72:80], "little")
+    except Exception:
+        pass
+    return None
+
+
 def get_memory() -> dict:
-    """Return RSS breakdown of Cosmos processes and total system RAM."""
+    """Return physical footprint breakdown of Cosmos processes and total system RAM."""
     total_bytes = 0
     try:
         total_bytes = int(subprocess.run(
@@ -150,22 +167,25 @@ def get_memory() -> dict:
     backend_bytes = 0
     try:
         out = subprocess.run(
-            ["ps", "ax", "-o", "rss=,command="],
+            ["ps", "ax", "-o", "pid=,rss=,command="],
             capture_output=True, text=True, timeout=5
         ).stdout
         for line in out.splitlines():
-            parts = line.strip().split(None, 1)
-            if len(parts) < 2:
+            parts = line.strip().split(None, 2)
+            if len(parts) < 3:
                 continue
             try:
-                rss_kb = int(parts[0])
+                pid = int(parts[0])
+                rss_kb = int(parts[1])
             except ValueError:
                 continue
-            cmd = parts[1]
+            cmd = parts[2]
             if "vmlx_engine" in cmd:
-                model_bytes += rss_kb * 1024
+                fp = _phys_footprint(pid)
+                model_bytes += fp if fp is not None else rss_kb * 1024
             elif "uvicorn" in cmd and "main:app" in cmd:
-                backend_bytes += rss_kb * 1024
+                fp = _phys_footprint(pid)
+                backend_bytes += fp if fp is not None else rss_kb * 1024
     except Exception:
         pass
 

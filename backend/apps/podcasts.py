@@ -436,6 +436,7 @@ async def ingest_episode(episode_id: str):
         show_name = podcast["title"] if podcast else "Unknown Show"
         episode_title = ep["title"]
         pub_date = (ep.get("pub_date") or "")[:10]
+        episode_description = (ep.get("description") or "").strip()[:300]
 
         log.info(f"[ingest] chunking {episode_title!r}")
         yield _sse(status="chunking", pct=5)
@@ -460,6 +461,7 @@ async def ingest_episode(episode_id: str):
                     "type": "podcast_chunk",
                     "show": show_name,
                     "episode": episode_title,
+                    "description": episode_description,
                     "pub_date": pub_date,
                     "episode_id": episode_id,
                     "podcast_id": ep["podcast_id"],

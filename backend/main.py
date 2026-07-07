@@ -82,7 +82,81 @@ async def model_status():
             r = await client.get("http://localhost:8080/health", timeout=1.5)
             data = r.json()
             backends = data.get("backends", [])
+            for b in backends:
+                port = b.get("port")
+                if port:
+                    try:
+                        br = await client.get(f"http://localhost:{port}/health", timeout=1.5)
+                        bdata = br.json()
+                        status = bdata.get("status", "unknown")
+                        model_loaded = bdata.get("model_loaded", False)
+                        # Normalize: treat healthy/running as running; standby_* as sleeping
+                        if status.startswith("standby"):
+                            norm = status
+                        elif status in ("loading", "starting"):
+                            norm = "loading"
+                        elif model_loaded:
+                            norm = "running"
+                        else:
+                            norm = status
+                        return {"available": norm == "running", "status": norm}
+                    except Exception:
+                        pass
             available = any(b.get("status") == "running" for b in backends)
-            return {"available": available}
+            return {"available": available, "status": "unknown"}
     except Exception:
-        return {"available": False}
+        return {"available": False, "status": "down"}
+
+
+@app.post("/model/sleep")
+async def model_sleep():
+    import httpx
+    api_key = os.getenv("VMLX_API_KEY", "local")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "http://localhost:8080/admin/deep-sleep",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=5.0,
+            )
+            return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/model/stop")
+async def model_stop():
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["ps", "ax", "-o", "pid=,command="],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        killed = []
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) < 2:
+                continue
+            pid, cmd = parts
+            if "vmlx_engine" in cmd:
+                subprocess.run(["kill", pid], timeout=3)
+                killed.append(int(pid))
+        return {"status": "stopped", "pids": killed} if killed else {"status": "not_found"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/model/wake")
+async def model_wake():
+    import httpx
+    api_key = os.getenv("VMLX_API_KEY", "local")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "http://localhost:8080/admin/wake",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=120.0,
+            )
+            return r.json()
+    except Exception as e:
+        return {"error": str(e)}

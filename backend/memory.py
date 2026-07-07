@@ -183,16 +183,19 @@ async def list_knowledge_sources() -> list[dict]:
         return []
     loop = asyncio.get_event_loop()
     results = await loop.run_in_executor(None, lambda: _knowledge.get(include=["metadatas"]))
-    sources: dict[tuple, int] = {}
+    sources: dict[tuple, dict] = {}
     for meta in results["metadatas"]:
         key = (
             meta.get("show", "Unknown"),
             meta.get("episode", ""),
             (meta.get("pub_date") or "")[:10],
         )
-        sources[key] = sources.get(key, 0) + 1
+        if key not in sources:
+            sources[key] = {"chunks": 0, "description": meta.get("description", "")}
+        sources[key]["chunks"] += 1
     return [
-        {"show": k[0], "episode": k[1], "pub_date": k[2], "chunks": v}
+        {"show": k[0], "episode": k[1], "pub_date": k[2],
+         "description": v["description"], "chunks": v["chunks"]}
         for k, v in sorted(sources.items(), key=lambda x: x[0][2], reverse=True)
     ]
 

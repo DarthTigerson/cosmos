@@ -36,21 +36,53 @@ function IconStop() {
   )
 }
 
+function IconDots() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="2"/>
+      <circle cx="12" cy="12" r="2"/>
+      <circle cx="19" cy="12" r="2"/>
+    </svg>
+  )
+}
+
 function useModelStatus() {
-  const [available, setAvailable] = useState(false)
+  const [modelState, setModelState] = useState('unknown')
+
   useEffect(() => {
     async function check() {
       try {
-        const res = await fetch('/model/status', { signal: AbortSignal.timeout(2000) })
+        const res = await fetch('/model/status', { signal: AbortSignal.timeout(3000) })
         const data = await res.json()
-        setAvailable(!!data.available)
-      } catch { setAvailable(false) }
+        const s = data.status
+        if (s === 'running') setModelState('running')
+        else if (s?.startsWith('standby')) setModelState('sleeping')
+        else if (s === 'loading' || s === 'starting') setModelState('loading')
+        else if (s === 'down') setModelState('down')
+        else setModelState(data.available ? 'running' : 'down')
+      } catch { setModelState('down') }
     }
     check()
-    const id = setInterval(check, 10000)
+    const id = setInterval(check, 5000)
     return () => clearInterval(id)
   }, [])
-  return available
+
+  async function sleepModel() {
+    setModelState('sleeping')
+    await fetch('/model/sleep', { method: 'POST' }).catch(() => {})
+  }
+
+  async function wakeModel() {
+    setModelState('loading')
+    await fetch('/model/wake', { method: 'POST' }).catch(() => {})
+  }
+
+  async function stopModel() {
+    setModelState('down')
+    await fetch('/model/stop', { method: 'POST' }).catch(() => {})
+  }
+
+  return { modelState, sleepModel, wakeModel, stopModel }
 }
 
 function useNetwork() {
@@ -138,9 +170,10 @@ function fmtGB(bytes) {
 
 function MemoryWidget({ mem }) {
   if (!mem) return null
-  const sysUsed = fmtGB(mem.system_used_bytes)
+  const totalUsed = fmtGB(mem.system_used_bytes)
   const total = fmtGB(mem.total_bytes)
   const cosmos = fmtGB(mem.cosmos_bytes)
+  const otherApps = fmtGB(Math.max(0, mem.system_used_bytes - mem.cosmos_bytes))
   const sysPct = mem.total_bytes > 0 ? Math.round((mem.system_used_bytes / mem.total_bytes) * 100) : 0
   return (
     <div className="memory-widget">
@@ -148,13 +181,13 @@ function MemoryWidget({ mem }) {
         <rect x="2" y="6" width="20" height="12" rx="2"/>
         <path d="M6 6V4M10 6V4M14 6V4M18 6V4M6 18v2M10 18v2M14 18v2M18 18v2"/>
       </svg>
-      <span className="memory-text">{sysUsed} <span className="memory-sep">/</span> {total} GB</span>
+      <span className="memory-text">{totalUsed} <span className="memory-sep">/</span> {total} GB</span>
       <div className="memory-popover">
         <div className="bpop-title">RAM · {sysPct}% used</div>
         <div className="bpop-divider"/>
         <div className="bpop-row">
-          <span className="bpop-label">System used</span>
-          <span className="bpop-val">{sysUsed} GB</span>
+          <span className="bpop-label">Other apps</span>
+          <span className="bpop-val">{otherApps} GB</span>
         </div>
         <div className="bpop-divider"/>
         <div className="bpop-row">
@@ -176,7 +209,7 @@ function MemoryWidget({ mem }) {
         <div className="bpop-divider"/>
         <div className="bpop-row">
           <span className="bpop-label">Total used</span>
-          <span className="bpop-val">{sysUsed} GB</span>
+          <span className="bpop-val">{totalUsed} GB</span>
         </div>
         <div className="bpop-row">
           <span className="bpop-label">Total available</span>
@@ -385,12 +418,21 @@ function ToolBlock({ calls }) {
   )
 }
 
-function Message({ msg, isLast, onRegenerate, loading }) {
+function Message({ msg, onRetry }) {
   const isUser = msg.role === 'user'
   const hasThinking = msg.thinking != null && msg.thinking.length > 0
   const streamingThinking = !!msg.streamingThinking
   const hasTools = msg.toolCalls && msg.toolCalls.length > 0
-  const showRegenerate = !isUser && isLast && !loading && !msg.streaming
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    navigator.clipboard.writeText(msg.content || '').then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  const showActions = !msg.streaming && msg.content
 
   return (
     <div className={`message ${isUser ? 'user' : 'cosmos'}`}>
@@ -404,21 +446,86 @@ function Message({ msg, isLast, onRegenerate, loading }) {
             {msg.streaming && <span className="cursor-inline" />}
           </div>
         )}
+        {showActions && (
+          <div className="msg-actions">
+            <button className="msg-action-btn" onClick={handleCopy} title={copied ? 'Copied!' : 'Copy'}>
+              {copied
+                ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              }
+            </button>
+            <button className="msg-action-btn" onClick={onRetry} title="Retry">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+          </div>
+        )}
       </div>
-      {showRegenerate && (
-        <button className="regenerate-btn" onClick={onRegenerate} title="Regenerate response">↺</button>
-      )}
       {isUser && <div className="avatar user-avatar">T</div>}
     </div>
   )
 }
 
-function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions, glyphClass }) {
+function ModelMenu({ modelState, onSleep, onWake, onStop }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const sleeping = modelState === 'sleeping'
+  const running = modelState === 'running'
+  const loading = modelState === 'loading'
+
+  const stateLabel = running ? 'Running' : sleeping ? 'Sleeping' : loading ? 'Loading…' : 'Offline'
+  const stateDot = running ? 'dot--running' : sleeping ? 'dot--sleeping' : loading ? 'dot--loading' : 'dot--down'
+
+  return (
+    <div className="model-menu" ref={ref}>
+      <button className="model-menu-btn" onClick={() => setOpen(o => !o)} title="Model options">
+        <IconDots />
+      </button>
+      {open && (
+        <div className="model-menu-dropdown">
+          <div className="model-menu-status">
+            <span className={`model-menu-dot ${stateDot}`} />
+            <span className="model-menu-status-label">{stateLabel}</span>
+          </div>
+          <div className="model-menu-divider" />
+          <button
+            className="model-menu-item"
+            disabled={!sleeping && !running}
+            onClick={() => { setOpen(false); sleeping ? onWake() : onSleep() }}
+          >
+            {sleeping ? '↑ Wake model' : '↓ Sleep model'}
+          </button>
+          <div className="model-menu-divider" />
+          <button
+            className="model-menu-item model-menu-item--danger"
+            disabled={modelState === 'down'}
+            onClick={() => { setOpen(false); onStop() }}
+          >
+            ⏻ Shut down
+          </button>
+          <div className="model-menu-note">fully unloads from memory</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, view, onViewChange, pendingQuestions, glyphClass, modelState, onSleep, onWake, onStop }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
         <span className={`cosmos-glyph ${glyphClass}`}>◈</span>
         <span className="sidebar-brand-name">Cosmos</span>
+        <ModelMenu modelState={modelState} onSleep={onSleep} onWake={onWake} onStop={onStop} />
       </div>
       <div
         className={`sidebar-nav-item${view === 'plugins' ? ' active' : ''}`}
@@ -503,7 +610,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [view, setView] = useState('chat')
   const [pendingQuestions, setPendingQuestions] = useState(0)
-  const modelAvailable = useModelStatus()
+  const { modelState, sleepModel, wakeModel, stopModel } = useModelStatus()
   const battery = useBattery()
   const net = useNetwork()
   const mem = useMemory()
@@ -616,18 +723,17 @@ export default function App() {
     } finally {
       abortRef.current = null
       setLoading(false)
-      setMessages(m => { const last = m[m.length - 1]; return last?.role === 'assistant' ? [...m.slice(0, -1), { ...last, streaming: false }] : m })
+      setMessages(m => { const last = m[m.length - 1]; return last?.role === 'assistant' ? [...m.slice(0, -1), { ...last, streaming: false, streamingThinking: false }] : m })
       fetchSessions()
     }
   }
 
-  async function send(overrideText) {
+  async function send(overrideText, addUserMessage = false) {
     const text = (overrideText ?? input).trim()
     if (!text || loading) return
 
     abortRef.current = new AbortController()
 
-    // Optimistically add session to sidebar before backend responds
     if (!overrideText && !sessions.find(s => s.id === sessionId)) {
       setSessions(s => [{
         id: sessionId,
@@ -637,7 +743,7 @@ export default function App() {
     }
 
     setMessages(m => [
-      ...(overrideText ? m : [...m, { role: 'user', content: text }]),
+      ...((overrideText && !addUserMessage) ? m : [...m, { role: 'user', content: text }]),
       { role: 'assistant', content: '', thinking: null, toolCalls: [], streaming: true },
     ])
     if (!overrideText) setInput('')
@@ -725,7 +831,7 @@ export default function App() {
       setMessages(m => {
         const last = m[m.length - 1]
         return last?.role === 'assistant'
-          ? [...m.slice(0, -1), { ...last, streaming: false }]
+          ? [...m.slice(0, -1), { ...last, streaming: false, streamingThinking: false }]
           : m
       })
       fetchSessions()
@@ -733,13 +839,18 @@ export default function App() {
     }
   }
 
-  async function regenerate() {
-    // Find the last user message
-    const lastUser = [...messages].reverse().find(m => m.role === 'user')
-    if (!lastUser) return
-    // Drop the last assistant message and re-send
-    setMessages(m => m.slice(0, -1))
-    await send(lastUser.content)
+  async function retryFrom(index) {
+    if (loading) return
+    const msg = messages[index]
+    if (msg.role === 'user') {
+      setMessages(m => m.slice(0, index))
+      await send(msg.content, true)
+    } else {
+      const prevUser = [...messages.slice(0, index)].reverse().find(m => m.role === 'user')
+      if (!prevUser) return
+      setMessages(m => m.slice(0, index))
+      await send(prevUser.content)
+    }
   }
 
   function onKey(e) {
@@ -757,7 +868,11 @@ export default function App() {
         view={view}
         onViewChange={setView}
         pendingQuestions={pendingQuestions}
-        glyphClass={loading ? 'thinking' : modelAvailable ? 'idle' : 'down'}
+        glyphClass={loading ? 'thinking' : modelState === 'running' ? 'idle' : modelState === 'loading' ? 'waking' : modelState === 'sleeping' ? 'sleeping' : 'down'}
+        modelState={modelState}
+        onSleep={sleepModel}
+        onWake={wakeModel}
+        onStop={stopModel}
       />
       <div className="app">
         <header className="header">
@@ -786,19 +901,17 @@ export default function App() {
             <main className="messages">
               {messages.length === 0 && (
                 <div className="empty-state">
-                  <div className={`cosmos-glyph empty-glyph${loading ? ' thinking' : modelAvailable ? ' idle' : ' down'}`}>◈</div>
+                  <div className={`cosmos-glyph empty-glyph${loading ? ' thinking' : modelState === 'running' ? ' idle' : modelState === 'loading' ? ' waking' : modelState === 'sleeping' ? ' sleeping' : ' down'}`}>◈</div>
                   <p>Ready when you are.</p>
                 </div>
               )}
               {messages.map((m, i) => (
-            <Message
-              key={i}
-              msg={m}
-              isLast={i === messages.length - 1}
-              onRegenerate={regenerate}
-              loading={loading}
-            />
-          ))}
+                <Message
+                  key={i}
+                  msg={m}
+                  onRetry={() => retryFrom(i)}
+                />
+              ))}
               <div ref={bottomRef} />
             </main>
 

@@ -19,17 +19,20 @@ class KnowledgePlugin(Plugin):
     tools = [
         _tool(
             "list_knowledge",
-            "List everything you've ingested — podcasts, shows, episodes. Use this to know what "
-            "you've heard and can draw on. Returns each source with chunk count and date.",
+            "List the sources you've ingested (shows, episodes, dates, chunk counts). Use only "
+            "when you need an inventory of what exists — NOT to answer questions about content. "
+            "For any question about what you know or heard, use search_knowledge instead.",
             {},
             [],
         ),
         _tool(
             "search_knowledge",
-            "Search your ingested knowledge for a specific topic. Returns relevant excerpts from "
-            "podcasts and other ingested content, with source labels.",
+            "Search your ingested knowledge (podcasts, transcripts, etc.) by topic and retrieve "
+            "the most relevant excerpts. Use this as your default whenever you want to recall "
+            "something you've heard or answer a question from your ingested content. "
+            "Prefer multiple focused queries over one broad one for better recall.",
             {
-                "query": {"type": "string", "description": "What to search for in your ingested content"},
+                "query": {"type": "string", "description": "Topic or question to search for in your ingested content"},
             },
             ["query"],
         ),
@@ -47,7 +50,10 @@ class KnowledgePlugin(Plugin):
                     label += f" — {s['episode']}"
                 if s["pub_date"]:
                     label += f" ({s['pub_date']})"
-                lines.append(f"• {label}  [{s['chunks']} chunks]")
+                line = f"• {label}  [{s['chunks']} chunks]"
+                if s.get("description"):
+                    line += f"\n  {s['description']}"
+                lines.append(line)
             return f"Ingested knowledge ({len(sources)} sources):\n" + "\n".join(lines)
 
         if tool_name == "search_knowledge":

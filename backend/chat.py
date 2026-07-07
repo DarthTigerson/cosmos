@@ -218,6 +218,13 @@ def _build_tool_prompt(tools: list[dict]) -> str:
         fn = t["function"]
         params = ", ".join(fn["parameters"]["properties"].keys())
         lines.append(f'- {fn["name"]}({params}): {fn["description"]}')
+    tool_names = {t["function"]["name"] for t in tools}
+    if "search_knowledge" in tool_names:
+        lines.append(
+            "\nKnowledge routing: you have ingested content (podcasts, etc.). "
+            "For any question about news, tech, or topics Thomas might have shared — "
+            "search_knowledge first. Only fall back to web search if your knowledge returns nothing relevant."
+        )
     return "\n".join(lines)
 
 
