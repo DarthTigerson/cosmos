@@ -372,7 +372,10 @@ You have tools. To call one, output exactly:
 Stop after the closing tag and wait for the result before continuing.
 
 Tools:
-- read_file(path): Read a file. path is relative to project root, e.g. "frontend/src/App.jsx"
+- read_file(path, offset?, limit?): Read up to 200 lines of a file. offset = first line (1-indexed, default 1). limit = lines to read (default 200, max 200). Always shows line numbers and total. If the file has more lines, the result includes a footer telling you the next offset.
+    read from start:  <tool_call>{"name": "read_file", "args": {"path": "frontend/src/App.jsx"}}</tool_call>
+    read from line 201: <tool_call>{"name": "read_file", "args": {"path": "frontend/src/App.jsx", "offset": 201}}</tool_call>
+    read 50 lines at 400: <tool_call>{"name": "read_file", "args": {"path": "frontend/src/App.jsx", "offset": 400, "limit": 50}}</tool_call>
 - write_file(path, content): Write content to a file (creates or overwrites). path relative to project root.
 - list_files(path): List a directory. path is relative to project root, e.g. "frontend/src". Use "" or "." for root. Examples:
     list_files root:    <tool_call>{"name": "list_files", "args": {"path": "."}}</tool_call>
@@ -423,17 +426,22 @@ async def _exec_tool(name: str, args: dict, root: str) -> tuple[str, Optional[st
             if not path:
                 return "Error: path escapes project root", None
             try:
-                text = Path(path).read_text(errors="replace")
-                limit = 12000  # ~3k tokens — keeps context manageable
-                if len(text) > limit:
-                    lines = text.splitlines()
-                    truncated = "\n".join(lines[:200])
-                    return (
-                        f"{truncated}\n\n"
-                        f"[Truncated: file has {len(lines)} lines / {len(text)} chars. "
-                        f"Use run_command with 'sed -n \"201,400p\" <path>' to read further sections.]"
-                    ), None
-                return text, None
+                all_lines = Path(path).read_text(errors="replace").splitlines()
+                total = len(all_lines)
+                offset = max(1, int(args.get("offset", 1)))
+                limit = min(int(args.get("limit", 200)), 200)
+                start = offset - 1  # convert to 0-indexed
+                end = min(start + limit, total)
+                chunk = all_lines[start:end]
+                rel = os.path.relpath(path, root)
+                header = f"{rel} (lines {offset}–{end} of {total})"
+                numbered = "\n".join(f"{offset + i:4d}  {line}" for i, line in enumerate(chunk))
+                remaining = total - end
+                footer = (
+                    f"\n[{remaining} more lines — call read_file with offset={end + 1} to continue]"
+                    if remaining > 0 else ""
+                )
+                return f"{header}\n{numbered}{footer}", None
             except Exception as e:
                 return f"Error: {e}", None
 
