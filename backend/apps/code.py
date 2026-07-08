@@ -423,7 +423,17 @@ async def _exec_tool(name: str, args: dict, root: str) -> tuple[str, Optional[st
             if not path:
                 return "Error: path escapes project root", None
             try:
-                return Path(path).read_text(errors="replace"), None
+                text = Path(path).read_text(errors="replace")
+                limit = 12000  # ~3k tokens — keeps context manageable
+                if len(text) > limit:
+                    lines = text.splitlines()
+                    truncated = "\n".join(lines[:200])
+                    return (
+                        f"{truncated}\n\n"
+                        f"[Truncated: file has {len(lines)} lines / {len(text)} chars. "
+                        f"Use run_command with 'sed -n \"201,400p\" <path>' to read further sections.]"
+                    ), None
+                return text, None
             except Exception as e:
                 return f"Error: {e}", None
 
@@ -529,7 +539,7 @@ async def _follow_state(state: _GenState):
     try:
         while True:
             try:
-                ev = await asyncio.wait_for(q.get(), timeout=30)
+                ev = await asyncio.wait_for(q.get(), timeout=8)
             except asyncio.TimeoutError:
                 yield ": heartbeat\n\n"
                 continue

@@ -76,7 +76,7 @@ async def _follow_state(state: _GenState):
     try:
         while True:
             try:
-                ev = await asyncio.wait_for(q.get(), timeout=30)
+                ev = await asyncio.wait_for(q.get(), timeout=8)
             except asyncio.TimeoutError:
                 yield ": heartbeat\n\n"
                 continue
