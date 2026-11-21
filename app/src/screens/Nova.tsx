@@ -2,7 +2,7 @@ import { type FormEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef,
 import { api, useLoad, useSignals } from '../api'
 import { Avatar } from '../avatar/Avatar'
 import { clock, longDate, when } from '../format'
-import { Meters, Problem } from '../parts'
+import { Linked, Meters, Problem } from '../parts'
 import type { Run, State, Step, StepSignal, StreamEvent, Today } from '../types'
 
 const tierLabel: Record<Step['tier'], string> = { main: 'main model', worker: 'worker', tool: 'tool', code: 'check' }
@@ -153,14 +153,16 @@ export function Nova({ state }: { state: State | null }) {
           {messages.map((m) =>
             m.kind === 'user_msg' ? (
               <div className="bubble" key={m.id}>
-                {m.text}
+                <Linked text={m.text} />
               </div>
             ) : m.kind === 'initiative' ? (
               <article className="reach" key={m.id}>
                 <span className="who">
                   {name} reached out · {clock(m.at)}
                 </span>
-                <p>{m.text}</p>
+                <p>
+                  <Linked text={m.text} />
+                </p>
                 {m.meta?.reason && <p className="why">Why: {m.meta.reason}</p>}
               </article>
             ) : (
@@ -188,7 +190,9 @@ export function Nova({ state }: { state: State | null }) {
                   )}
                 </span>
                 {m.text.split('\n').filter(Boolean).map((line, i) => (
-                  <p key={i}>{line}</p>
+                  <p key={i}>
+                    <Linked text={line} />
+                  </p>
                 ))}
               </article>
             ),
