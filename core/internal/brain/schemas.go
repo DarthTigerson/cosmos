@@ -26,7 +26,7 @@ const stepShapes = `{"anyOf":[
  {"type":"object","properties":{"tool":{"const":"calendar.remove"},"id":{"type":"integer"}},"required":["tool","id"]},
  {"type":"object","properties":{"tool":{"const":"web.search"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"web.read"},"url":{"type":"string","maxLength":300}},"required":["tool","url"]},
- {"type":"object","properties":{"tool":{"const":"podcasts.search"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
+ {"type":"object","properties":{"tool":{"const":"podcasts.heard"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"podcasts.listen"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"podcasts.find"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"lists.add"},"list":{"type":"string","maxLength":40},"items":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"string","maxLength":60}}},"required":["tool","list","items"]},

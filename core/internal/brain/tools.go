@@ -37,7 +37,7 @@ type StepCall struct {
 	Items []string        `json:"items,omitempty"`
 }
 
-var toolNames = []string{"weather.now", "memory.search", "people.find", "calendar.list", "calendar.find", "calendar.add", "calendar.remove", "web.search", "web.read", "lists.add", "lists.show", "lists.done", "lists.remove", "podcasts.search", "podcasts.listen", "podcasts.find"}
+var toolNames = []string{"weather.now", "memory.search", "people.find", "calendar.list", "calendar.find", "calendar.add", "calendar.remove", "web.search", "web.read", "lists.add", "lists.show", "lists.done", "lists.remove", "podcasts.heard", "podcasts.listen", "podcasts.find"}
 
 const toolHelp = `- weather.now: the weather now, today and tomorrow for a place, compared with her own log of recent days. Args: place (leave empty for the home location).
 - memory.search: look up what she remembers. Args: query.
@@ -48,8 +48,8 @@ const toolHelp = `- weather.now: the weather now, today and tomorrow for a place
 - calendar.remove: delete a calendar item. Args: id (from calendar.list).
 - web.search: look something up online: news, facts about the world, opening hours, how to do something. Args: query (a few plain search words).
 - web.read: read one page or feed, when the short results are not enough. Each link on the page is shown with its address in brackets, and any RSS feeds it offers are listed under feeds; a later step can read one of those. Args: url (copied exactly from a result, a page or the user, never made up).
-- podcasts.search: look through the podcast episodes she has listened to. Args: query (the topic; leave empty to see what she listened to lately).
-- podcasts.find: find a podcast show online by name, with its RSS feed address, from Apple's podcast directory. Use it whenever they want a show's feed or want to follow a show. Args: query (the show's name).
+- podcasts.heard: what she remembers from episodes she has already listened to, on the shows she follows. Not for finding a show. Args: query (the topic; leave empty to see what she listened to lately).
+- podcasts.find: search for a podcast show online by its name and get its RSS feed address, from Apple's podcast directory. Use it whenever they ask to search for, look up or find a podcast, want its feed, or want to follow it. Args: query (the show's name only, without "podcast").
 - podcasts.listen: queue an older episode of a show she follows, when they ask her to listen to it. Args: query (words from the episode's title, or its date).
 - lists.add: put things on one of their lists. Args: list ("shopping", "to-do", or any name they use), items (each thing as its own short entry, in their words).
 - lists.show: read a list. Args: list (leave empty for all lists).
@@ -163,8 +163,24 @@ func (b *Brain) runTool(ctx context.Context, c StepCall) (any, error) {
 		}
 		return map[string]any{"known": true, "name": p.Name, "relationship": p.Relationship, "closeness": closenessWord(p.Closeness), "notes": p.Notes}, nil
 
-	case "podcasts.search":
-		return b.searchPodcasts(c.Query)
+	case "podcasts.heard":
+		res, err := b.searchPodcasts(c.Query)
+		if err != nil {
+			return nil, err
+		}
+		// "Search for the podcast X" reads like this tool to a small
+		// planner. When X is not a show she follows, the directory is
+		// what was wanted.
+		out, ok := res.(map[string]any)
+		found, _ := out["found"].([]map[string]any)
+		if ok && len(found) == 0 && b.Cfg.Get().WebSearch && !b.followsShow(c.Query) {
+			if shows, err := b.Web.Podcasts(ctx, c.Query); err == nil && len(shows) > 0 {
+				out["not_followed"] = "Nothing she has heard matches, and she follows no show called " + strings.TrimSpace(c.Query) + ". In case that is the name of a show, these are the shows by that name in Apple's podcast directory."
+				out["in_podcast_directory"] = shows
+				out["note"] = "feed is each show's RSS address. Give it exactly as written."
+			}
+		}
+		return res, nil
 
 	case "podcasts.listen":
 		return b.listenToOlder(c.Query)

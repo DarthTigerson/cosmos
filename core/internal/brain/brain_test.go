@@ -1434,6 +1434,29 @@ func TestPodcastFeedTurn(t *testing.T) {
 	}
 }
 
+func TestSearchingHeardForAShowLooksItUp(t *testing.T) {
+	r := newRig(t)
+	web := &fakeWeb{shows: []PodcastShow{{Name: "The WAN Show", By: "Linus Tech Tips", Feed: "https://feeds.megaphone.fm/LMG3928170156"}}}
+	r.b.Web = web
+	// The planner reads "search for the podcast" as a look through what
+	// she has heard.
+	r.fake.Handlers["route"] = func(q llm.Request) (string, error) {
+		return `{"intent":"podcasts","mode":"once","steps":[{"tool":"podcasts.heard","query":"WAN Show"}]}`, nil
+	}
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		if !strings.Contains(q.Messages[len(q.Messages)-1].Content, "https://feeds.megaphone.fm/LMG3928170156") {
+			t.Errorf("the writer was not given the directory's answer: %s", q.Messages[len(q.Messages)-1].Content)
+		}
+		return "Found it: https://feeds.megaphone.fm/LMG3928170156", nil
+	}
+	if _, err := r.say("search for the podcast the wan show"); err != nil {
+		t.Fatal(err)
+	}
+	if len(web.asked) != 1 || web.asked[0] != "WAN Show" {
+		t.Fatalf("asked = %v", web.asked)
+	}
+}
+
 func TestMadeUpLinksAreFound(t *testing.T) {
 	facts := `{"feed":"https://example.org/feed.xml?a=1&b=2","page":"https://example.com/news/"}`
 	if bad := unsupportedLinks("It is https://example.org/feed.xml?a=1&b=2. Or see (https://example.com/news).", facts); len(bad) != 0 {

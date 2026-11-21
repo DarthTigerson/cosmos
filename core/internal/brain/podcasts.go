@@ -816,6 +816,28 @@ func (b *Brain) heardNotes(mems []store.Memory, query string, now time.Time) (st
 
 // searchPodcasts looks through what she took from the episodes she has
 // listened to.
+// followsShow reports whether a query names a show she follows: every
+// word of it is in the show's title. An empty query names none, and asks
+// about what she has heard.
+func (b *Brain) followsShow(query string) bool {
+	q := tokens(query)
+	if len(q) == 0 {
+		return true
+	}
+	feeds, _ := b.S.Feeds()
+	for _, f := range feeds {
+		title := " " + norm(f.Title) + " "
+		all := true
+		for _, t := range q {
+			all = all && strings.Contains(title, " "+t)
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Brain) searchPodcasts(query string) (any, error) {
 	done, err := b.S.Episodes(0, 40, "done")
 	if err != nil {
