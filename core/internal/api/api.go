@@ -78,6 +78,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/podcasts/episodes/{id}/transcript", s.auth(s.episodeTranscript))
 	mux.HandleFunc("POST /api/podcasts/episodes/{id}/listen", s.auth(s.listenToEpisode))
 	mux.HandleFunc("POST /api/memories/{id}/forget", s.auth(s.forgetMemory))
+	mux.HandleFunc("POST /api/memories/{id}/restore", s.auth(s.restoreMemory))
+	mux.HandleFunc("PUT /api/memories/{id}", s.auth(s.changeMemory))
 	mux.HandleFunc("POST /api/speech", s.auth(s.speech))
 	mux.HandleFunc("POST /api/hear", s.auth(s.hear))
 	mux.HandleFunc("GET /api/voices", s.auth(s.voices))
@@ -404,22 +406,107 @@ func (s *Server) undoTidy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"undone": true})
 }
 
+// memories lists what she holds, or with ?forgotten=1 what the user put
+// away. Each carries the wordings it replaced.
 func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
-	mems, err := s.B.S.Memories()
+	load := s.B.S.Memories
+	if r.URL.Query().Get("forgotten") == "1" {
+		load = s.B.S.ForgottenMemories
+	}
+	mems, err := load()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	replaced, _ := s.B.S.Replaced()
+	history, _ := s.B.S.Histories()
 	type view struct {
 		store.Memory
-		Replaced string `json:"replaced,omitempty"` // the wording this one took over from
+		History []store.Past `json:"history,omitempty"`
 	}
 	out := make([]view, len(mems))
 	for i, m := range mems {
-		out[i] = view{Memory: m, Replaced: replaced[m.ID]}
+		out[i] = view{Memory: m, History: history[m.ID]}
 	}
 	writeJSON(w, 200, out)
+}
+
+// changeMemory corrects a memory's wording or pins it. A correction
+// replaces the memory the way a changed fact does, so the old wording
+// stays on record.
+func (s *Server) changeMemory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	var in struct {
+		Content *string `json:"content"`
+		Pinned  *bool   `json:"pinned"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable change: "+err.Error())
+		return
+	}
+	m, err := s.B.S.GetMemory(id)
+	if err != nil {
+		fail(w, 404, "no such memory")
+		return
+	}
+	if m.Archived {
+		fail(w, 409, "this memory was put away; bring it back first")
+		return
+	}
+	if in.Pinned != nil {
+		m.Importance = 2
+		if *in.Pinned {
+			m.Importance = store.Pinned
+		}
+		if err := s.B.S.SetMemoryImportance(id, m.Importance); err != nil {
+			fail(w, 500, err.Error())
+			return
+		}
+	}
+	if in.Content != nil {
+		content := strings.TrimSpace(*in.Content)
+		if content == "" {
+			fail(w, 400, "a memory needs some words; forget it instead")
+			return
+		}
+		if content != m.Content {
+			next := m
+			next.Content, next.CreatedAt, next.UpdatedAt = content, s.B.Now(), time.Time{}
+			if m, err = s.B.S.Supersede(id, next); err != nil {
+				fail(w, 500, err.Error())
+				return
+			}
+		}
+	}
+	s.B.Bus.Publish("memories", nil)
+	writeJSON(w, 200, m)
+}
+
+// restoreMemory brings back a memory the user forgot.
+func (s *Server) restoreMemory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	m, err := s.B.S.GetMemory(id)
+	if err != nil {
+		fail(w, 404, "no such memory")
+		return
+	}
+	if m.SupersededBy != 0 {
+		fail(w, 409, "a newer memory replaced this one")
+		return
+	}
+	if err := s.B.S.SetMemoryArchived(id, false); err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	s.B.Bus.Publish("memories", nil)
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // getVoice returns who she is and how she talks, as the user can edit it.
@@ -885,6 +972,7 @@ func (s *Server) forgetMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.B.Bus.Publish("podcasts", nil)
+	s.B.Bus.Publish("memories", nil)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

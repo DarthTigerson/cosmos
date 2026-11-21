@@ -394,6 +394,40 @@ func TestMemoriesKeepTheirSourceAndTheirHistory(t *testing.T) {
 	}
 }
 
+func TestHistoryKeepsEveryEarlierWording(t *testing.T) {
+	r := newRig(t)
+	a, _ := r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas lives in Munich.", CreatedAt: r.now.Add(-48 * time.Hour)})
+	b, _ := r.b.S.Supersede(a.ID, store.Memory{Kind: "fact", Content: "Thomas lives in Berlin.", CreatedAt: r.now.Add(-24 * time.Hour)})
+	c, _ := r.b.S.Supersede(b.ID, store.Memory{Kind: "fact", Content: "Thomas lives in Lisbon.", CreatedAt: r.now})
+	history, _ := r.b.S.Histories()
+	got := history[c.ID]
+	if len(got) != 2 || got[0].Content != "Thomas lives in Berlin." || got[1].Content != "Thomas lives in Munich." {
+		t.Fatalf("every earlier wording should be kept, newest first: %+v", got)
+	}
+	// Replaced memories are history, not forgotten.
+	r.b.S.SetMemoryArchived(c.ID, true)
+	forgotten, _ := r.b.S.ForgottenMemories()
+	if len(forgotten) != 1 || forgotten[0].ID != c.ID {
+		t.Fatalf("only the memory put away should be forgotten: %+v", forgotten)
+	}
+}
+
+func TestPinnedMemoriesAreAlwaysRecalled(t *testing.T) {
+	r := newRig(t)
+	mems := []store.Memory{}
+	for i := range 30 {
+		m, _ := r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas likes coffee number " + string(rune('A'+i)) + ".", CreatedAt: r.now.Add(time.Duration(i) * time.Minute)})
+		mems = append(mems, m)
+	}
+	pin, _ := r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas has hay fever in spring.", Importance: store.Pinned, CreatedAt: r.now.Add(-time.Hour)})
+	mems = append(mems, pin)
+	for _, picked := range [][]store.Memory{rankMemories(mems, "coffee", r.now, 5), r.b.rank(mems, "coffee", r.now, 5)} {
+		if len(picked) != 5 || picked[0].ID != pin.ID {
+			t.Fatalf("a pinned memory should always be recalled, oldest first: %+v", picked)
+		}
+	}
+}
+
 func TestRestatingAFactLeavesNoHistory(t *testing.T) {
 	r := newRig(t)
 	r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas lives in Berlin.", CreatedAt: r.now})

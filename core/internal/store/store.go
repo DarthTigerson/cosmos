@@ -456,6 +456,54 @@ func (s *Store) Replaced() (map[int64]string, error) {
 	return out, rows.Err()
 }
 
+// Past is one wording a memory used to have, and when it was learned.
+type Past struct {
+	Content string    `json:"content"`
+	Since   time.Time `json:"since"`
+}
+
+// Histories returns, for each memory that replaced another, every wording
+// before it, newest first.
+func (s *Store) Histories() (map[int64][]Past, error) {
+	old, err := s.queryMemories(`WHERE superseded_by<>0 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	before := map[int64]Memory{}
+	for _, m := range old {
+		before[m.SupersededBy] = m
+	}
+	out := map[int64][]Past{}
+	for id := range before {
+		// The bound guards against a loop in a hand-edited database.
+		for cur := id; len(out[id]) < 50; {
+			m, ok := before[cur]
+			if !ok {
+				break
+			}
+			out[id] = append(out[id], Past{Content: m.Content, Since: m.CreatedAt})
+			cur = m.ID
+		}
+	}
+	return out, nil
+}
+
+// ForgottenMemories are the memories the user put away, newest first.
+// Memories set aside because a newer one replaced them are history, not
+// forgotten, and are left out.
+func (s *Store) ForgottenMemories() ([]Memory, error) {
+	return s.queryMemories(`WHERE archived=1 AND superseded_by=0 ORDER BY id DESC`)
+}
+
+// Pinned is the importance of a memory the user asked her to keep in
+// mind. Pinned memories are always offered to the model.
+const Pinned = 5
+
+func (s *Store) SetMemoryImportance(id int64, importance int) error {
+	_, err := s.db.Exec(`UPDATE memories SET importance=? WHERE id=?`, importance, id)
+	return err
+}
+
 func (s *Store) SetMemoryArchived(id int64, archived bool) error {
 	_, err := s.db.Exec(`UPDATE memories SET archived=? WHERE id=?`, archived, id)
 	return err

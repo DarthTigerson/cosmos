@@ -38,6 +38,9 @@ func rankMemories(mems []store.Memory, query string, now time.Time, limit int) [
 	if len(mems) <= limit {
 		return mems
 	}
+	if pinned, rest := splitPinned(mems); len(pinned) > 0 {
+		return withPinned(pinned, rankMemories(rest, query, now, max(0, limit-len(pinned))), limit)
+	}
 	terms := map[string]bool{}
 	for _, t := range tokens(query) {
 		terms[t] = true
@@ -72,6 +75,31 @@ func rankMemories(mems []store.Memory, query string, now time.Time, limit int) [
 	for i := range picked {
 		picked[i] = all[i].m
 	}
+	sort.SliceStable(picked, func(i, j int) bool { return picked[i].CreatedAt.Before(picked[j].CreatedAt) })
+	return picked
+}
+
+// splitPinned separates the memories the user pinned from the rest.
+func splitPinned(mems []store.Memory) (pinned, rest []store.Memory) {
+	for _, m := range mems {
+		if m.Importance >= store.Pinned {
+			pinned = append(pinned, m)
+		} else {
+			rest = append(rest, m)
+		}
+	}
+	return pinned, rest
+}
+
+// withPinned puts the pinned memories back with the ones ranked from the
+// rest. Pinned ones always take their places; past the limit, the newest
+// pinned win. The result is oldest first, like any ranking.
+func withPinned(pinned, ranked []store.Memory, limit int) []store.Memory {
+	if len(pinned) > limit {
+		sort.SliceStable(pinned, func(i, j int) bool { return pinned[i].CreatedAt.After(pinned[j].CreatedAt) })
+		pinned = pinned[:limit]
+	}
+	picked := append(append([]store.Memory{}, pinned...), ranked...)
 	sort.SliceStable(picked, func(i, j int) bool { return picked[i].CreatedAt.Before(picked[j].CreatedAt) })
 	return picked
 }

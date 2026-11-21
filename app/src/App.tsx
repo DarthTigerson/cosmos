@@ -20,7 +20,8 @@ const screens = ['nova', 'mind', 'memory', 'people', 'calendar', 'lists', 'podca
 type ScreenName = (typeof screens)[number]
 
 function fromHash(): ScreenName {
-  const name = location.hash.replace('#', '')
+  // A screen may carry a detail after a slash: #people/12.
+  const name = location.hash.replace('#', '').split('/')[0]
   return (screens as readonly string[]).includes(name) ? (name as ScreenName) : 'nova'
 }
 

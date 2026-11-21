@@ -6,7 +6,8 @@ import type { Person, PersonDetail } from '../types'
 
 export function People() {
   const { data, error, reload } = useLoad<Person[]>('/api/people')
-  const [picked, setPicked] = useState<number | null>(null)
+  // #people/12 opens that person, as linked from a memory.
+  const [picked, setPicked] = useState<number | null>(() => Number(location.hash.split('/')[1]) || null)
   useSignals((s) => {
     if (s.kind === 'message' || s.kind === 'state') reload()
   })

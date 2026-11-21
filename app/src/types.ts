@@ -126,8 +126,16 @@ export interface Memory {
   content: string
   importance: number
   created_at: string
+  last_used_at: string
+  archived: boolean
   source: string
-  replaced?: string
+  history?: Past[]
+}
+
+// One wording a memory used to have, and when she learned it.
+export interface Past {
+  content: string
+  since: string
 }
 
 export interface Voice {
@@ -306,7 +314,7 @@ export interface ModelsView {
 }
 
 export interface Signal {
-  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing'
+  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing' | 'memories'
   data: unknown
 }
 
