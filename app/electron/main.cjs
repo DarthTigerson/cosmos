@@ -149,12 +149,14 @@ function createWindow() {
     show: !process.env.COSMOS_SCREENSHOT_DIR,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   })
-  // The only thing the page may ask for is the microphone, for talking
-  // to her. Everything else is refused.
+  // The only things the page may ask for are the microphone, for talking
+  // to her, and the camera, for her to see you. Everything else is refused.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, done, details) => {
-    if (permission !== 'media' || (details.mediaTypes || []).includes('video')) return done(false)
-    if (process.platform === 'darwin') systemPreferences.askForMediaAccess('microphone').then(done, () => done(false))
-    else done(true)
+    if (permission !== 'media') return done(false)
+    if (process.platform !== 'darwin') return done(true)
+    const kinds = details.mediaTypes || []
+    const asks = [kinds.includes('audio') && 'microphone', kinds.includes('video') && 'camera'].filter(Boolean)
+    Promise.all(asks.map((kind) => systemPreferences.askForMediaAccess(kind))).then((ok) => done(ok.every(Boolean)), () => done(false))
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)

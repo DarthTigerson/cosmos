@@ -799,9 +799,22 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
 .avatar-state.lit { color: var(--nova); }
 .avatar-state.lit i { background: var(--nova); }
 .avatar-state.asleep i { background: var(--line-strong); }
-.avatar-actions { display: flex; gap: 8px; }
-.avatar-actions .primary { flex: 1; min-width: 0; padding: 0 12px; }
-.avatar-actions .secondary[aria-pressed='true'] { border-color: var(--nova); color: var(--nova); }
+/* Her three senses under her: voice, listening, camera. Equal widths,
+   amber while on, a red dot while a microphone or camera is live. */
+.her-senses { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+.her-sense { position: relative; min-height: 44px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-strong); border-radius: 10px; background: none; color: var(--muted); }
+.her-sense:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+.her-sense.on { border-color: var(--nova); color: var(--nova); background: rgba(224, 164, 88, 0.12); }
+.her-sense:disabled { opacity: 0.4; cursor: default; }
+.her-sense-live { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #f07a6a; box-shadow: 0 0 0 2px #0e1220; }
+.her-sight { position: absolute; top: 10px; right: 10px; width: 112px; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); background: #0a0d15; box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.7); }
+.her-sight[hidden] { display: none; }
+.her-sight video { display: block; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.her-sight span { position: absolute; left: 6px; bottom: 5px; display: flex; align-items: center; gap: 5px; font: 500 9px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: #fff; text-shadow: 0 1px 3px #000; }
+.her-sight span i { width: 6px; height: 6px; border-radius: 50%; background: #f07a6a; }
+.her-only .her-sight { right: auto; left: 10px; }
+/* Her small round figure has no room for it; the red dot says the camera is on. */
+.her-compact .her-sight { display: none; }
 /* Her side panel: four ways to show her, sections that fold, and a line
    on its inner edge that sets its width. */
 .her-grip { position: relative; z-index: 2; flex: none; width: 9px; margin: 0 -4px; display: grid; place-items: center; cursor: col-resize; touch-action: none; }

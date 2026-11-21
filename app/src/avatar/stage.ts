@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { type VRM, type VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import { loadMixamoAnimation } from './mixamo'
+import type { Copied, Seen } from './sight'
 
 // The stage draws her 3D model and keeps her alive between words.
 //
@@ -65,6 +66,11 @@ export class Stage {
   private expr: Record<string, number> = {}
   private saved = new Map<THREE.Object3D, THREE.Quaternion>()
   private pointer = { x: 0, y: 0, at: -10 }
+  // What her camera shows, when it is on; null when it is off.
+  private seen: Seen | null = null
+  // The copied face as shown, eased so it does not twitch.
+  private mirror: Copied = { smile: 0, blinkLeft: 0, blinkRight: 0, browUp: 0, frown: 0, jawOpen: 0, yaw: 0, pitch: 0, roll: 0 }
+  private copying = 0
   private t = 0
   private since = 0
   private last = 0
@@ -194,6 +200,10 @@ export class Stage {
   setFace(face: Face) { this.face = face }
   setMouth(mouth: Mouth) { this.mouth = mouth }
 
+  // What her camera shows. While it shows something she watches that, and
+  // the pointer is left alone.
+  see(seen: Seen | null) { this.seen = seen }
+
   // Where the pointer is over the window, -1 to 1 each way. She glances
   // at it for a moment when it moves.
   look(x: number, y: number) {
@@ -280,7 +290,16 @@ export class Stage {
     let gx = s.toX
     let gy = s.toY
     if (thinking && s.thinkingFor > 0.6) { gx = 0.35; gy = 0.3 }
-    if (t - this.pointer.at < 1.8) { gx = this.pointer.x * 0.5; gy = -this.pointer.y * 0.3 }
+    const watching = this.seen?.watching ?? 'pointer'
+    if (watching === 'motion') { gx = this.seen!.x * 0.5; gy = -this.seen!.y * 0.3 }
+    else if (watching === 'copy') { gx = this.seen!.x * 0.2; gy = -this.seen!.y * 0.12 }
+    else if (t - this.pointer.at < 1.8) { gx = this.pointer.x * 0.5; gy = -this.pointer.y * 0.3 }
+    // Copying a face fades in and out rather than snapping.
+    this.copying = ease(this.copying, watching === 'copy' && this.seen?.face && !asleep ? 1 : 0, 4, dt)
+    const want = this.seen?.face
+    for (const k of Object.keys(this.mirror) as (keyof Copied)[]) this.mirror[k] = ease(this.mirror[k], want ? want[k] : 0, 12, dt)
+    const mr = this.mirror
+    const c = this.copying
     s.lookX = ease(s.lookX, gx, 7, dt)
     s.lookY = ease(s.lookY, gy, 7, dt)
     const head = this.bone('head')
@@ -313,9 +332,9 @@ export class Stage {
       s.lookX * 0.35,
       s.asleep * 0.06)
     this.turn('head',
-      droop * 0.6 - s.lookY * 0.35 + s.nod * 0.06 * Math.sin(t * 5.2) + Math.sin(t * 0.7) * 0.008,
-      s.lookX * 0.5 + (talking ? Math.sin(t * 1.3) * 0.03 * (0.4 + s.loud) : 0),
-      s.asleep * 0.1 + Math.sin(t * 0.45) * 0.01 + (talking ? Math.sin(t * 0.9) * 0.025 * s.loud : 0))
+      droop * 0.6 - s.lookY * 0.35 + s.nod * 0.06 * Math.sin(t * 5.2) + Math.sin(t * 0.7) * 0.008 + mr.pitch * 0.6 * c,
+      s.lookX * 0.5 + (talking ? Math.sin(t * 1.3) * 0.03 * (0.4 + s.loud) : 0) + mr.yaw * 0.6 * c,
+      s.asleep * 0.1 + Math.sin(t * 0.45) * 0.01 + (talking ? Math.sin(t * 0.9) * 0.025 * s.loud : 0) + mr.roll * 0.7 * c)
 
     // ----- face -----
     const em = vrm.expressionManager
@@ -328,8 +347,13 @@ export class Stage {
         s.nextBlink = s.again ? 0.22 : rand(2.4, 6) / (0.6 + this.face.energy * 0.8)
       }
       s.blink = Math.max(0, s.blink - dt * 8)
-      em.setValue('blink', Math.max(s.blink, s.asleep))
-      for (const k of MOUTH) em.setValue(k, this.shown[k])
+      // Copying, your blinks are hers, eye by eye; her own fade away.
+      em.setValue('blink', Math.max(s.blink * (1 - c), s.asleep))
+      em.setValue('blinkLeft', mr.blinkLeft * c)
+      em.setValue('blinkRight', mr.blinkRight * c)
+      // While she speaks her mouth stays with her words; otherwise it
+      // opens as yours does.
+      for (const k of MOUTH) em.setValue(k, k === 'aa' ? Math.max(this.shown.aa, mr.jawOpen * c * (1 - Math.min(1, loud * 3))) : this.shown[k])
       // Her mood shows: the feeling she has now, over a trace of a smile
       // when she is warm. A wide mouth while speaking would fight the
       // smile, so the expression gives way a little to speech.
@@ -337,6 +361,11 @@ export class Stage {
       for (const p of PRESETS) {
         let target = p === this.face.expression ? this.face.intensity : 0
         if (p === 'relaxed' && this.face.expression === 'neutral') target = rest
+        // Copying, your face leads and her mood stays faintly underneath.
+        if (c > 0.01) {
+          const yours = p === 'happy' ? mr.smile : p === 'surprised' ? mr.browUp * 0.8 : p === 'angry' ? mr.frown * 0.6 : 0
+          target = target * (1 - c * 0.8) + yours * c
+        }
         target *= (1 - s.asleep) * (1 - loud * 0.5)
         const cur = this.expr[p] ?? 0
         const next = ease(cur, target, 3, dt)

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { apiHear, useSignals } from '../api'
 import type { State, StepSignal, StreamEvent } from '../types'
 import { type Ears, openEars } from './ears'
+import type { Watching } from './sight'
 import { sentences, Speaker } from './speech'
 import { type Face, Stage } from './stage'
 
@@ -27,11 +28,30 @@ const notSpeech = ['you', 'thank you.', 'thanks for watching!', 'thank you for w
 // none at all, or her figure filling the panel with the rest over it.
 export type HerView = 'full' | 'compact' | 'text' | 'only'
 
-// Her figure beside the chat: the 3D model, alive between words. "Talk
-// to her" starts a call that works like a phone call: she listens, she
-// knows when you have finished, she answers aloud as she writes, and
-// she stops if you cut in. There is nothing to hold down. A call goes on
-// whichever way she is shown, even with no figure.
+// Remembered between visits, so her voice stays on once turned on.
+const kept = (key: string) => {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+const keep = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Not remembered; it still works for now.
+  }
+}
+
+// Her figure beside the chat: the 3D model, alive between words. Three
+// buttons under her, each on or off by itself:
+//   - voice: she says her replies aloud as she writes them;
+//   - listen: she hears you, knows when you have finished, and stops if
+//     you cut in. There is nothing to hold down;
+//   - see: the camera. She decides for herself what to do with it.
+// Voice and listening go on whichever way she is shown; the camera needs
+// her figure, so it goes off with it.
 export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string) => void; view: HerView; mindCount: number }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<Stage | null>(null)
@@ -41,11 +61,15 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   const [ready, setReady] = useState(false)
   const [problem, setProblem] = useState('')
   const [speaking, setSpeaking] = useState(false)
-  const [call, setCall] = useState(false)
-  const [muted, setMuted] = useState(false)
+  const [voice, setVoice] = useState(() => kept('cosmos:her-voice') === 'on')
   const [ear, setEar] = useState<Ear>('off')
-  const inCall = useRef(call)
-  inCall.current = call
+  const listening = ear !== 'off'
+  const [seeing, setSeeing] = useState(false)
+  const [watching, setWatching] = useState<Watching>('pointer')
+  const video = useRef<HTMLVideoElement>(null)
+  const sight = useRef<{ stop: () => void } | null>(null)
+  const aloud = useRef(voice)
+  aloud.current = voice
   const say = useRef(onSay)
   say.current = onSay
   // What of the reply being written has already been said aloud.
@@ -96,12 +120,14 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     }
   }, [shown])
 
-  // Leaving the screen ends the call.
+  // Leaving the screen stops her voice, her ears and her camera.
   useEffect(
     () => () => {
       speaker.current?.stop()
       ears.current?.stop()
       ears.current = null
+      sight.current?.stop()
+      sight.current = null
     },
     [],
   )
@@ -112,6 +138,48 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   }, [close, ready])
 
   const asleep = state?.state === 'asleep'
+
+  // The camera: on while she is shown and awake. What she sees goes to the
+  // stage, which looks or copies; nothing is kept.
+  useEffect(() => {
+    if (!seeing || !shown || asleep || !video.current) return
+    let gone = false
+    let was: Watching = 'pointer'
+    setProblem('')
+    // Loaded only when first needed: the face finder is large.
+    const el = video.current
+    import('./sight')
+      .then(({ openSight }) =>
+        openSight(el, (seen) => {
+          if (gone) return
+          stage.current?.see(seen)
+          if (seen.watching !== was) {
+            was = seen.watching
+            setWatching(was)
+          }
+        }),
+      )
+      .then((s) => {
+        if (gone) s.stop()
+        else sight.current = s
+      })
+      .catch(() => {
+        if (gone) return
+        setSeeing(false)
+        setProblem('She cannot see you: the camera is not allowed. Allow it for Cosmos in System Settings, under Privacy and Security.')
+      })
+    return () => {
+      gone = true
+      sight.current?.stop()
+      sight.current = null
+      stage.current?.see(null)
+      setWatching('pointer')
+    }
+  }, [seeing, shown, asleep])
+  // With no figure, or asleep, the camera turns off rather than waiting.
+  useEffect(() => {
+    if (!shown || asleep) setSeeing(false)
+  }, [shown, asleep])
   const pose = asleep ? 'asleep' : speaking ? 'talking' : working || ear === 'writing' ? 'thinking' : 'idle'
   useEffect(() => {
     stage.current?.setPose(pose)
@@ -125,11 +193,11 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     stage.current?.setFace({ expression, intensity, warmth, energy })
   }, [feeling, warmth, energy, ready])
 
-  // In a call she speaks as she writes. Each sentence is said as soon as
+  // With her voice on she speaks as she writes. Each sentence is said as soon as
   // the next one has begun; the last waits for the finished reply, since
   // the end of a draft is the part most likely to change.
   useSignals((s) => {
-    if (!inCall.current) return
+    if (!aloud.current) return
     const sp = speaker.current!
     if (s.kind === 'step') {
       const step = s.data as StepSignal
@@ -161,7 +229,7 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     }
   })
 
-  async function startCall() {
+  async function startListening() {
     setProblem('')
     try {
       ears.current = await openEars({
@@ -185,24 +253,23 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
       setProblem('She cannot hear you: the microphone is not allowed. Allow it for Cosmos in System Settings, under Privacy and Security.')
       return
     }
-    setMuted(false)
     setEar('listening')
-    setCall(true)
   }
 
-  function endCall() {
-    setCall(false)
+  function stopListening() {
     setEar('off')
-    speaker.current?.stop()
     ears.current?.stop()
     ears.current = null
-    said.current = []
   }
 
-  function toggleMute() {
-    const next = !muted
-    setMuted(next)
-    ears.current?.setMuted(next)
+  function toggleVoice() {
+    const next = !voice
+    setVoice(next)
+    keep('cosmos:her-voice', next ? 'on' : 'off')
+    if (!next) {
+      speaker.current?.stop()
+      said.current = []
+    }
   }
 
   const word = asleep
@@ -213,11 +280,13 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
         ? 'hearing you'
         : pose === 'thinking'
           ? 'thinking'
-          : call
-            ? muted
-              ? 'not listening'
-              : 'listening'
-            : 'here'
+          : watching === 'copy'
+            ? 'copying you'
+            : watching === 'motion'
+              ? 'watching'
+              : listening
+                ? 'listening'
+                : 'here'
   const lit = word === 'talking' || word === 'hearing you' || word === 'thinking'
   const status = (
     <span className={`avatar-state ${lit ? 'lit' : ''} ${asleep ? 'asleep' : ''}`} role="status">
@@ -225,20 +294,21 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
       {word}
     </span>
   )
-  const actions = call ? (
-    <div className="avatar-actions">
-      <button type="button" className="secondary" aria-pressed={muted} onClick={toggleMute}>
-        {muted ? 'Unmute' : 'Mute'}
+  const actions = (
+    <div className="her-senses">
+      <button type="button" className={`her-sense ${voice ? 'on' : ''}`} aria-pressed={voice} aria-label={voice ? 'Stop her speaking aloud' : 'Hear her replies aloud'} title={voice ? 'Stop her speaking aloud' : 'Hear her replies aloud'} onClick={toggleVoice}>
+        <SenseIcon name="voice" off={!voice} />
       </button>
-      <button type="button" className="primary" onClick={endCall}>
-        End the call
+      <button type="button" className={`her-sense ${listening ? 'on' : ''}`} aria-pressed={listening} aria-label={listening ? 'Stop her listening' : 'Talk to her'} title={listening ? 'Stop her listening' : 'Talk to her'} disabled={asleep && !listening} onClick={() => (listening ? stopListening() : void startListening())}>
+        <SenseIcon name="listen" off={!listening} />
+        {listening && <i className="her-sense-live" aria-hidden="true" />}
       </button>
-    </div>
-  ) : (
-    <div className="avatar-actions">
-      <button type="button" className="primary" disabled={asleep} onClick={() => void startCall()}>
-        Talk to her
-      </button>
+      {shown && (
+        <button type="button" className={`her-sense ${seeing ? 'on' : ''}`} aria-pressed={seeing} aria-label={seeing ? 'Turn her camera off' : 'Let her see you'} title={seeing ? 'Turn her camera off' : 'Let her see you'} disabled={asleep} onClick={() => setSeeing(!seeing)}>
+          <SenseIcon name="see" off={!seeing} />
+          {seeing && <i className="her-sense-live" aria-hidden="true" />}
+        </button>
+      )}
     </div>
   )
   const mood = state?.mood
@@ -248,6 +318,14 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
         <div className="avatar-stage">
           <canvas ref={canvas} role="img" aria-label={`${state?.name ?? 'She'}, ${word}`} />
           {!ready && !problem && <span className="avatar-wait">She is arriving…</span>}
+          {/* What she sees, small, mirrored as a mirror would show you. */}
+          <div className="her-sight" hidden={!seeing}>
+            <video ref={video} aria-label="What her camera sees" />
+            <span>
+              <i aria-hidden="true" />
+              {watching === 'copy' ? 'copying you' : watching === 'motion' ? 'watching' : 'her view'}
+            </span>
+          </div>
           {view === 'only' && (
             <div className="her-overlay">
               <div className="her-glass">
@@ -307,7 +385,35 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
         </p>
       )}
       {view !== 'only' && actions}
-      {call && view !== 'only' && <p className="quiet">Just talk. She answers when you pause, and stops if you speak over her.</p>}
+      {listening && view !== 'only' && <p className="quiet">Just talk. She answers when you pause, and stops if you speak over her.</p>}
     </div>
+  )
+}
+
+// The three buttons' icons: crossed out while off.
+function SenseIcon({ name, off }: { name: 'voice' | 'listen' | 'see'; off: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {name === 'voice' && (
+        <>
+          <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+          {off ? <path d="M16 9.5l5 5M21 9.5l-5 5" /> : <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />}
+        </>
+      )}
+      {name === 'listen' && (
+        <>
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+          {off && <path d="M4 4l16 16" />}
+        </>
+      )}
+      {name === 'see' && (
+        <>
+          <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 14 18H4.5A1.5 1.5 0 0 1 3 16.5z" />
+          <path d="M15.5 10.5 21 7.5v9l-5.5-3" />
+          {off && <path d="M3 3l18 18" />}
+        </>
+      )}
+    </svg>
   )
 }
