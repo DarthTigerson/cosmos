@@ -118,7 +118,7 @@ export function App() {
         {screen === 'lists' && <Lists />}
         {screen === 'podcasts' && <Podcasts />}
         {screen === 'sleep' && <Sleep />}
-        {screen === 'models' && <Models />}
+        {screen === 'models' && <Models asleep={state?.state === 'asleep'} />}
         {screen === 'settings' && <Settings onSaved={reload} />}
       </div>
       <Footer state={state} error={error} screen={screen} />

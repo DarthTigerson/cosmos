@@ -366,19 +366,92 @@ input[type='checkbox'] { width: 18px; min-height: 18px; height: 18px; padding: 0
 /* ---------- Models ---------- */
 code { font: 400 13px/1.4 var(--mono); background: var(--raised); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
 .notice { background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px 16px; max-width: 760px; }
-.models { display: flex; flex-direction: column; gap: 18px; max-width: 920px; }
-.model { display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
-.model > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.state { display: inline-flex; align-items: center; gap: 8px; font: 400 12px/1.6 var(--mono); color: var(--muted); }
-.state i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
-.state.running, .state.external { color: var(--sys); }
-.state.running i, .state.external i { background: var(--sys); }
-.state.starting { color: var(--nova); }
-.state.starting i { background: var(--nova); animation: pulse 1s ease-in-out infinite; }
-.state.failed { color: var(--danger); }
-.state.failed i { background: var(--danger); }
+/* The memory plan: each side's models laid against the Mac's memory. */
+.mdl-plan { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px 36px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.mdl-bars { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.mdl-bar-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 120px; gap: 14px; align-items: center; }
+.mdl-bar-row .who { font: 600 14px/1.2 var(--display); }
+.mdl-bar-row .who small { display: block; font: 400 11px/1.4 var(--mono); color: var(--dim); }
+.mdl-bar { height: 26px; display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--ground); }
+.mdl-bar span { height: 100%; display: flex; align-items: center; padding: 0 8px; overflow: hidden; white-space: nowrap; border-right: 1px solid var(--ground); font: 500 11px/1 var(--mono); color: var(--ground); }
+.mdl-bar .mac { background: #4a536b; color: var(--text); }
+.mdl-bar .main, .mdl-tag.main { background: var(--nova); }
+.mdl-bar .worker, .mdl-tag.worker { background: var(--sys); }
+.mdl-bar .sleeper, .mdl-tag.sleeper { background: #c49ad8; }
+.mdl-bar .embed, .mdl-tag.embed { background: #8fcf9b; }
+.mdl-bar .over { background: repeating-linear-gradient(45deg, var(--danger) 0 6px, transparent 6px 12px); }
+.mdl-bar-row .total { text-align: right; font: 500 13px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.mdl-bar-row .total small { display: block; font-size: 11px; color: #8fcf9b; }
+.mdl-bar-row .total small.bad { color: var(--danger); }
+.mdl-now { display: flex; flex-direction: column; gap: 8px; padding-left: 24px; border-left: 1px solid var(--line); }
+.mdl-now b { font: 600 22px/1.2 var(--display); font-variant-numeric: tabular-nums; }
+.mdl-now-state { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+.mdl-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.mdl-dot.running, .mdl-dot.external { background: #8fcf9b; box-shadow: 0 0 0 3px rgba(143, 207, 155, 0.18); }
+.mdl-dot.starting { background: var(--nova); animation: pulse 1.2s ease-in-out infinite; }
+.mdl-dot.resting, .mdl-dot.shared { background: var(--line-strong); }
+.mdl-dot.failed { background: var(--danger); }
 @keyframes pulse { 50% { opacity: 0.3; } }
-.picker { display: flex; flex-direction: column; gap: 6px; }
+/* Each model is one line until opened. */
+.mdl-group { display: flex; flex-direction: column; gap: 8px; }
+.mdl-list { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.mdl + .mdl { border-top: 1px solid var(--line); }
+.mdl-row { width: 100%; display: grid; grid-template-columns: 10px 190px minmax(0, 1fr) 190px 16px; gap: 16px; align-items: center; padding: 14px 18px; border: 0; border-radius: 0; background: var(--panel); text-align: left; color: var(--text); }
+.mdl-row:hover { background: var(--raised); }
+.mdl-row .name { font: 600 15px/1.25 var(--display); }
+.mdl-row .name small { display: block; margin-top: 2px; font: 400 12px/1.4 var(--body); color: var(--dim); }
+.mdl-row .file { min-width: 0; }
+.mdl-row .file > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 13px/1.4 var(--mono); }
+.mdl-row .file .sub { margin-top: 2px; font-size: 12px; color: var(--dim); }
+.mdl-row .file .none { font: italic 400 13px/1.4 var(--body); color: var(--dim); }
+.mdl-row .st { font-size: 13px; color: var(--muted); }
+.mdl-row .chev { color: var(--dim); transition: transform 0.15s; }
+.mdl.open .chev { transform: rotate(90deg); }
+.mdl-detail { display: flex; flex-direction: column; gap: 18px; padding: 18px 18px 20px 44px; border-top: 1px solid var(--line-soft); background: var(--ground); }
+.mdl-help { max-width: 72ch; font-size: 14px; color: var(--muted); }
+.mdl-choose { display: flex; flex-direction: column; gap: 8px; }
+.mdl-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.mdl-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: none; text-align: left; color: var(--text); }
+.mdl-file:hover { border-color: var(--line-strong); }
+.mdl-file[aria-checked='true'] { border-color: var(--nova); background: rgba(224, 164, 88, 0.1); }
+.mdl-file i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+.mdl-file[aria-checked='true'] i { border: 4px solid var(--nova); }
+.mdl-file .fn { min-width: 0; }
+.mdl-file .fn > span:first-child { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 13px/1.35 var(--mono); }
+.mdl-file .fit { padding: 4px 6px; border-radius: 5px; white-space: nowrap; font: 400 11px/1 var(--mono); }
+.mdl-file .fit.ok { color: #8fcf9b; background: rgba(143, 207, 155, 0.1); }
+.mdl-file .fit.no { color: var(--danger); background: rgba(242, 151, 138, 0.12); }
+.mdl-rest { padding: 10px 14px; border-radius: 10px; background: var(--raised); font-size: 13px; color: var(--muted); }
+.mdl-adv { padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.mdl-adv summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.mdl-adv summary:hover { color: var(--text); }
+.mdl-adv .row { margin-top: 12px; }
+/* Every file on disk, once, with the models that use it. */
+.mdl-disk { display: flex; flex-direction: column; gap: 10px; }
+.mdl-disk-list li { display: grid; grid-template-columns: minmax(0, 1fr) 90px 220px; gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+.mdl-disk-list li:first-child { border-top: 0; }
+.mdl-disk-list .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.mdl-disk-list .used { display: flex; flex-wrap: wrap; gap: 4px; }
+.mdl-disk-list .used.unused { font-style: italic; color: var(--dim); }
+.mdl-tag { padding: 4px 6px; border-radius: 5px; font: 400 11px/1 var(--mono); color: var(--ground); }
+@media (max-width: 1000px) {
+  .mdl-plan { grid-template-columns: minmax(0, 1fr); }
+  .mdl-now { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .mdl-row { grid-template-columns: 10px minmax(0, 1fr) 16px; }
+  .mdl-row .file, .mdl-row .st { grid-column: 2; }
+  .mdl-row .chev { grid-column: 3; grid-row: 1; }
+  .mdl-disk-list li { grid-template-columns: minmax(0, 1fr) 80px; }
+  .mdl-disk-list .used { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .mdl-bar-row { grid-template-columns: minmax(0, 1fr) 110px; }
+  .mdl-bar-row .mdl-bar { grid-column: 1 / -1; grid-row: 2; }
+  .mdl-detail { padding-left: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mdl-dot.starting { animation: none; }
+  .mdl-row .chev { transition: none; }
+}
 .file { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px; text-align: left; background: var(--ground); border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
 .file:hover { border-color: var(--line-strong); color: var(--text); }
 .file i { flex: 0 0 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
