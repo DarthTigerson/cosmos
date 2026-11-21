@@ -35,9 +35,9 @@ export function Meters({ mood }: { mood: Mood }) {
   )
 }
 
-export function Screen({ eyebrow, title, action, children }: { eyebrow: string; title: string; action?: ReactNode; children: ReactNode }) {
+export function Screen({ eyebrow, title, action, className, children }: { eyebrow: string; title: string; action?: ReactNode; className?: string; children: ReactNode }) {
   return (
-    <main className="screen">
+    <main className={className ? `screen ${className}` : 'screen'}>
       <header className="screen-head">
         <div>
           <span className="eyebrow">{eyebrow}</span>

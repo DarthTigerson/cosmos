@@ -193,6 +193,14 @@ input[type='checkbox'] { width: 18px; min-height: 18px; height: 18px; padding: 0
 .mind-side { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 28px; }
 .mind-side section { display: flex; flex-direction: column; gap: 12px; }
 .mind-side .values { font-size: 14px; gap: 10px; }
+/* Wide enough for two columns: the heading and her mood stay put, and the
+   timeline and the side scroll on their own. */
+@media (min-width: 1001px) {
+  .screen.pinned { overflow: hidden; padding-bottom: 0; }
+  .pinned > .mind { flex: 1; min-height: 0; flex-wrap: nowrap; align-items: stretch; }
+  .pinned .timeline, .pinned .mind-side { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 10px 30px 0; }
+  .pinned .timeline-head { position: sticky; top: 0; z-index: 1; padding-bottom: 10px; background: var(--ground); }
+}
 
 /* ---------- Sleep, Memory ---------- */
 .slept { display: flex; flex-direction: column; gap: 14px; max-width: 880px; }
