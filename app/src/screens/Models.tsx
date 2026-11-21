@@ -14,6 +14,7 @@ const stateWords: Record<TierView['status']['state'], string> = {
   running: 'running',
   starting: 'loading the model…',
   stopped: 'stopped',
+  resting: 'resting',
   failed: 'failed to start',
   external: 'answering (started outside Cosmos)',
 }
@@ -172,6 +173,13 @@ export function Models() {
                 )}
               </div>
               {!shared && !chosen && state !== 'external' && <p className="quiet">Choose a model file above, then Start. She also starts it herself when she needs it.</p>}
+              {!shared && state === 'resting' && (
+                <p className="quiet">
+                  {t.tier === 'sleeper'
+                    ? 'Loads when she falls asleep, after the main and worker models have stopped. While she is awake, the main model does its work.'
+                    : 'Stopped while she sleeps, to leave room for the sleep model. It loads again when she wakes.'}
+                </p>
+              )}
               {t.status.error && <Problem message={t.status.error} />}
               {openLog === t.tier && t.status.log && <Log text={t.status.log} />}
             </article>

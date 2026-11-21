@@ -49,10 +49,12 @@ type Client interface {
 }
 
 // HTTP is the real client. Prepare, when set, is called before each request
-// so a launcher can start the server for that tier.
+// so a launcher can start the server for that tier. It says which tier
+// answers instead, since a model at rest hands its work to one that is
+// loaded, and gives back a release to call when the request is over.
 type HTTP struct {
 	Cfg     *config.Holder
-	Prepare func(ctx context.Context, tier string) error
+	Prepare func(ctx context.Context, tier string) (string, func(), error)
 	client  http.Client
 }
 
@@ -62,9 +64,12 @@ func NewHTTP(cfg *config.Holder) *HTTP {
 
 func (h *HTTP) Complete(ctx context.Context, req Request) (Response, error) {
 	if h.Prepare != nil {
-		if err := h.Prepare(ctx, req.Tier); err != nil {
+		tier, release, err := h.Prepare(ctx, req.Tier)
+		if err != nil {
 			return Response{}, err
 		}
+		defer release()
+		req.Tier = tier
 	}
 	ep := h.Cfg.Get().Tier(req.Tier)
 	if ep.BaseURL == "" {
@@ -160,9 +165,11 @@ func (h *HTTP) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 		return nil, errors.New("no embedding model configured")
 	}
 	if h.Prepare != nil {
-		if err := h.Prepare(ctx, "embed"); err != nil {
+		_, release, err := h.Prepare(ctx, "embed")
+		if err != nil {
 			return nil, err
 		}
+		defer release()
 	}
 	raw, _ := json.Marshal(map[string]any{"model": ep.Model, "input": texts})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ep.BaseURL, "/")+"/embeddings", bytes.NewReader(raw))

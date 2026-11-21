@@ -289,7 +289,7 @@ export interface TierView {
   tier: TierName
   endpoint: Endpoint
   shared_with?: string
-  status: { state: 'running' | 'starting' | 'stopped' | 'failed' | 'external'; error?: string; log?: string }
+  status: { state: 'running' | 'starting' | 'stopped' | 'resting' | 'failed' | 'external'; error?: string; log?: string }
 }
 
 export interface ModelFile {

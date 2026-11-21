@@ -47,6 +47,11 @@ func (b *Brain) Sleep(ctx context.Context) (SleepReport, error) {
 }
 
 func (b *Brain) wake(now time.Time) {
+	if b.Rest != nil {
+		if err := b.Rest(context.Background(), false); err != nil {
+			b.Log.Printf("sleep: resting the sleeper model: %v", err)
+		}
+	}
 	b.S.Set("state", "awake")
 	b.S.Set("awake_since", now.Format(time.RFC3339))
 	b.Bus.Publish("state", "awake")
@@ -139,6 +144,12 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 
 	b.S.Set("state", "asleep")
 	b.Bus.Publish("state", "asleep")
+	// The waking models make room for the sleeper before it loads.
+	if b.Rest != nil {
+		if err := b.Rest(ctx, true); err != nil {
+			b.Log.Printf("sleep: resting the waking models: %v", err)
+		}
+	}
 
 	// ----- a second look -----
 	// Memory capture runs once, in passing, after each reply, and a small

@@ -1018,6 +1018,14 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 // modelAction starts, stops or restarts the server for a tier. Loading a
 // model takes a while, so start returns at once and the screen follows
 // progress through GET /api/models.
+// restingWhy explains a model that is stopped because of her state.
+func restingWhy(tier string) string {
+	if tier == "sleeper" {
+		return "The sleep model only loads while she sleeps, so it never shares memory with the main and worker models."
+	}
+	return "She is asleep, so this model is stopped to leave room for the sleep model. It loads again when she wakes."
+}
+
 func (s *Server) modelAction(w http.ResponseWriter, r *http.Request) {
 	tier, action := r.PathValue("tier"), r.PathValue("action")
 	if s.Launch == nil {
@@ -1042,6 +1050,10 @@ func (s *Server) modelAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "choose a model file first")
 			return
 		}
+		if s.Launch.Resting(tier) {
+			fail(w, 409, restingWhy(tier))
+			return
+		}
 		start()
 	case "stop":
 		if err := s.Launch.Stop(tier); err != nil {
@@ -1049,6 +1061,10 @@ func (s *Server) modelAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "restart":
+		if s.Launch.Resting(tier) {
+			fail(w, 409, restingWhy(tier))
+			return
+		}
 		s.Launch.Stop(tier)
 		time.Sleep(400 * time.Millisecond)
 		start()

@@ -77,10 +77,11 @@ func main() {
 	launch := launcher.New(cfg, logger)
 	defer launch.StopAll()
 	client := llm.NewHTTP(cfg)
-	client.Prepare = launch.Ensure
+	client.Prepare = launch.Acquire
 
 	b := brain.New(s, client, cfg)
 	b.Log = logger
+	b.Rest = launch.Rest
 	b.E = client
 	b.PodDir = filepath.Join(*data, "podcasts")
 	b.MCP = mcp.NewManager()

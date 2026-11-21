@@ -40,6 +40,10 @@ type Brain struct {
 	Transcribe Transcriber
 	podBusy    atomic.Bool
 	Log        *log.Logger
+	// Rest loads the models for her state and stops the others, so the
+	// sleeper and the waking models are never in memory together. Nil
+	// leaves the models alone.
+	Rest func(ctx context.Context, asleep bool) error
 
 	// One model job at a time: every model shares the same GPU.
 	turn sync.Mutex
