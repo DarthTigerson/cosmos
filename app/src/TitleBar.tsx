@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { useLoad } from './api'
+import { Orbit } from './parts'
 import type { BatteryStatus, MemoryBreakdown, MemoryUsage, ModelsView, TierName } from './types'
 
 // The bar along the top of the window, after vIDE's: it holds the window's
@@ -37,7 +38,7 @@ function usePoll<T>(read: (() => Promise<T>) | undefined, ms: number, on = true)
   return value
 }
 
-export function TitleBar({ title }: { title: string }) {
+export function TitleBar({ title, asleep }: { title: string; asleep: boolean }) {
   // Outside Electron (a plain browser while developing) there is nothing to
   // read, so the pills stay away.
   const memory = usePoll(readMemory, MEMORY_POLL_MS)
@@ -45,6 +46,10 @@ export function TitleBar({ title }: { title: string }) {
 
   return (
     <header className="titlebar">
+      <span className="titlebar-brand">
+        <Orbit size={16} asleep={asleep} />
+        Cosmos Platform
+      </span>
       <span className="titlebar-title">{title}</span>
       <div className="titlebar-right">
         {memory && <MemoryPill usage={memory} />}

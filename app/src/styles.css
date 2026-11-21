@@ -49,7 +49,6 @@ a:hover { color: #a9d3ee; }
 .frame { display: flex; flex-direction: column; height: 100%; }
 .app { flex: 1; min-height: 0; display: flex; }
 .nav { flex: 0 0 232px; width: 232px; min-width: 0; display: flex; flex-direction: column; gap: 24px; background: var(--nav); border-right: 1px solid var(--line-soft); padding: 22px 14px 20px; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; font: 600 19px/1 var(--display); letter-spacing: 0.01em; }
 .nav nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .nav-link { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 12px; border-radius: 8px; color: var(--muted); text-decoration: none; }
 .nav-link:hover { color: var(--text); background: #141a2b; }
@@ -888,6 +887,8 @@ kbd { display: inline-block; padding: 0 4px; border: 1px solid var(--line); bord
    window everywhere but on the pills. Their details drop down from it. */
 .titlebar { position: relative; z-index: 35; flex: none; height: 32px; display: flex; align-items: center; justify-content: center; background: var(--nav); border-bottom: 1px solid var(--line-soft); -webkit-app-region: drag; user-select: none; }
 .titlebar-title { font: 500 13px/1 var(--body); color: var(--muted); }
+/* Lined up with the nav links below it. */
+.titlebar-brand { position: absolute; left: 26px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 7px; font: 600 13px/1 var(--display); letter-spacing: 0.01em; color: var(--text); white-space: nowrap; }
 .titlebar-right { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 10px; -webkit-app-region: no-drag; }
 .titlebar-rule { width: 1px; height: 14px; background: var(--line); }
 .tb-pill { position: relative; display: flex; align-items: center; gap: 6px; height: 24px; font: 500 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); cursor: default; }

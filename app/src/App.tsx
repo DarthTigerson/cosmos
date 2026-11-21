@@ -3,7 +3,7 @@ import { api, useLoad, useSignals } from './api'
 import { clock } from './format'
 import { Footer } from './Footer'
 import { TitleBar } from './TitleBar'
-import { Orbit, Problem } from './parts'
+import { Problem } from './parts'
 import { Calendar } from './screens/Calendar'
 import { Lists } from './screens/Lists'
 import { Podcasts } from './screens/Podcasts'
@@ -66,13 +66,9 @@ export function App() {
 
   return (
     <div className="frame">
-      <TitleBar title={labels[screen]} />
+      <TitleBar title={labels[screen]} asleep={asleep} />
       <div className="app">
         <aside className="nav">
-          <div className="brand">
-            <Orbit size={26} asleep={asleep} />
-            <span>Cosmos Platform</span>
-          </div>
           <nav aria-label="Sections">
             <div className="nav-nova">
               <a href="#nova" aria-current={screen === 'nova' ? 'page' : undefined} className="nav-link">
