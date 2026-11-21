@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, useLoad, useSignals } from './api'
-import { clock, isZero } from './format'
+import { clock } from './format'
+import { Footer } from './Footer'
 import { Orbit, Problem } from './parts'
 import { Calendar } from './screens/Calendar'
 import { Lists } from './screens/Lists'
@@ -62,70 +63,63 @@ export function App() {
   const current = sessions.data?.current ?? 0
 
   return (
-    <div className="app">
-      <aside className="nav">
-        <div className="drag" />
-        <div className="brand">
-          <Orbit size={26} asleep={asleep} />
-          <span>Cosmos Platform</span>
-        </div>
-        <nav aria-label="Sections">
-          <div className="nav-nova">
-            <a href="#nova" aria-current={screen === 'nova' ? 'page' : undefined} className="nav-link">
-              {name}
-            </a>
-            <button type="button" className="nav-toggle" aria-expanded={open} aria-label={open ? 'Hide sessions' : 'Show sessions'} onClick={() => setOpen(!open)}>
-              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none" className={open ? 'turned' : ''}>
-                <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+    <div className="frame">
+      <div className="app">
+        <aside className="nav">
+          <div className="drag" />
+          <div className="brand">
+            <Orbit size={26} asleep={asleep} />
+            <span>Cosmos Platform</span>
           </div>
-          {open && (
-            <div className="sessions">
-              <span className="sessions-head">Since she last slept</span>
-              <button type="button" className="session new" onClick={() => void go('/api/sessions')}>
-                New session
+          <nav aria-label="Sections">
+            <div className="nav-nova">
+              <a href="#nova" aria-current={screen === 'nova' ? 'page' : undefined} className="nav-link">
+                {name}
+              </a>
+              <button type="button" className="nav-toggle" aria-expanded={open} aria-label={open ? 'Hide sessions' : 'Show sessions'} onClick={() => setOpen(!open)}>
+                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none" className={open ? 'turned' : ''}>
+                  <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
-              {list.length === 0 && <span className="sessions-none">Nothing open yet.</span>}
-              {list.map((s) => (
-                <button type="button" key={s.id} className="session" aria-current={s.id === current ? 'true' : undefined} onClick={() => void go(`/api/sessions/${s.id}/open`)}>
-                  <span className="session-title">{s.title || 'New session'}</span>
-                  <span className={s.id === current || s.started_by === 'nova' ? 'session-when hers' : 'session-when'}>
-                    {s.id === current ? 'now' : s.started_by === 'nova' ? 'hers' : clock(s.started_at)}
-                  </span>
-                </button>
-              ))}
-              <Problem message={problem} />
             </div>
-          )}
-          {screens.filter((s) => s !== 'nova').map((s) => (
-            <a key={s} href={`#${s}`} aria-current={screen === s ? 'page' : undefined} className={s === 'models' ? 'nav-link last' : 'nav-link'}>
-              {labels[s]}
-              {s === 'sleep' && !!state?.pending_proposals && <span className="badge">{state.pending_proposals} to review</span>}
-            </a>
-          ))}
-        </nav>
-        <div className="nav-foot">
-          {error ? (
-            <span className="down">core not answering</span>
-          ) : (
-            <>
-              <span>core running</span>
-              {state && <span>{asleep ? 'asleep' : isZero(state.awake_since) ? 'awake' : `awake since ${clock(state.awake_since)}`}</span>}
-            </>
-          )}
-        </div>
-      </aside>
-      {screen === 'nova' && <Nova state={state} />}
-      {screen === 'mind' && <Mind />}
-      {screen === 'memory' && <Memory />}
-      {screen === 'people' && <People />}
-      {screen === 'calendar' && <Calendar />}
-      {screen === 'lists' && <Lists />}
-      {screen === 'podcasts' && <Podcasts />}
-      {screen === 'sleep' && <Sleep />}
-      {screen === 'models' && <Models />}
-      {screen === 'settings' && <Settings onSaved={reload} />}
+            {open && (
+              <div className="sessions">
+                <span className="sessions-head">Since she last slept</span>
+                <button type="button" className="session new" onClick={() => void go('/api/sessions')}>
+                  New session
+                </button>
+                {list.length === 0 && <span className="sessions-none">Nothing open yet.</span>}
+                {list.map((s) => (
+                  <button type="button" key={s.id} className="session" aria-current={s.id === current ? 'true' : undefined} onClick={() => void go(`/api/sessions/${s.id}/open`)}>
+                    <span className="session-title">{s.title || 'New session'}</span>
+                    <span className={s.id === current || s.started_by === 'nova' ? 'session-when hers' : 'session-when'}>
+                      {s.id === current ? 'now' : s.started_by === 'nova' ? 'hers' : clock(s.started_at)}
+                    </span>
+                  </button>
+                ))}
+                <Problem message={problem} />
+              </div>
+            )}
+            {screens.filter((s) => s !== 'nova').map((s) => (
+              <a key={s} href={`#${s}`} aria-current={screen === s ? 'page' : undefined} className={s === 'models' ? 'nav-link last' : 'nav-link'}>
+                {labels[s]}
+                {s === 'sleep' && !!state?.pending_proposals && <span className="badge">{state.pending_proposals} to review</span>}
+              </a>
+            ))}
+          </nav>
+        </aside>
+        {screen === 'nova' && <Nova state={state} />}
+        {screen === 'mind' && <Mind />}
+        {screen === 'memory' && <Memory />}
+        {screen === 'people' && <People />}
+        {screen === 'calendar' && <Calendar />}
+        {screen === 'lists' && <Lists />}
+        {screen === 'podcasts' && <Podcasts />}
+        {screen === 'sleep' && <Sleep />}
+        {screen === 'models' && <Models />}
+        {screen === 'settings' && <Settings onSaved={reload} />}
+      </div>
+      <Footer state={state} error={error} screen={screen} />
     </div>
   )
 }

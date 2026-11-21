@@ -40,3 +40,13 @@ export function closenessWord(c: number): string {
   if (c >= 0.4) return 'familiar'
   return 'distant'
 }
+
+// "Saturday the 21st of November", as the footer clock says it.
+export function fullDate(d: Date): string {
+  const weekday = d.toLocaleDateString('en-GB', { weekday: 'long' })
+  const month = d.toLocaleDateString('en-GB', { month: 'long' })
+  const day = d.getDate()
+  const teen = day % 100 >= 11 && day % 100 <= 13
+  const suffix = teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[day % 10] ?? 'th'
+  return `${weekday} the ${day}${suffix} of ${month}`
+}

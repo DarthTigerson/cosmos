@@ -1,6 +1,6 @@
 // The Electron shell. It owns the window and nothing else: Nova's mind is
 // the cosmos-core process, which this file starts and stops.
-const { app, BrowserWindow, ipcMain, dialog, shell, session, systemPreferences } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, systemPreferences } = require('electron')
 const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
@@ -108,6 +108,32 @@ async function startCore() {
   return { baseUrl, token }
 }
 
+// The menu is Electron's usual one, except for text size: ⌘⇧+ / ⌘⇧− / ⌘⇧0
+// ask the page to change it (it keeps the size and shows it in the footer).
+// The plain ⌘+ / ⌘− / ⌘0 page zoom is left out on purpose.
+function setMenu() {
+  const size = (dir) => () => BrowserWindow.getFocusedWindow()?.webContents.send('cosmos:text-size', dir)
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { label: 'Actual Text Size', accelerator: 'CmdOrCtrl+Shift+0', click: size('reset') },
+        { label: 'Larger Text', accelerator: 'CmdOrCtrl+Shift+=', click: size('larger') },
+        { label: 'Smaller Text', accelerator: 'CmdOrCtrl+Shift+-', click: size('smaller') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]))
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1240,
@@ -196,6 +222,7 @@ app.whenReady().then(async () => {
     return
   }
   ipcMain.handle('cosmos:conn', () => conn)
+  setMenu()
   const win = createWindow()
   if (process.env.COSMOS_SCREENSHOT_DIR) screenshots(win, process.env.COSMOS_SCREENSHOT_DIR)
   app.on('activate', () => {

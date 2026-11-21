@@ -8,7 +8,11 @@ interface Conn {
 
 declare global {
   interface Window {
-    cosmos?: { conn(): Promise<Conn> }
+    cosmos?: {
+      conn(): Promise<Conn>
+      setZoom(factor: number): void
+      onTextSize(handler: (dir: 'larger' | 'smaller' | 'reset') => void): () => void
+    }
   }
 }
 
