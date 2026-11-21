@@ -585,7 +585,7 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
 
 /* ---------- narrow windows ---------- */
 @media (max-width: 1000px) {
-  .rail { display: none; }
+  .rail, .her-grip { display: none; }
   .columns, .columns.two, .people { grid-template-columns: minmax(0, 1fr); }
   .people-screen { overflow-y: auto; }
   .people { margin-bottom: 0; }
@@ -802,7 +802,56 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
 .avatar-actions { display: flex; gap: 8px; }
 .avatar-actions .primary { flex: 1; min-width: 0; padding: 0 12px; }
 .avatar-actions .secondary[aria-pressed='true'] { border-color: var(--nova); color: var(--nova); }
-.avatar-arrow { flex: none; display: grid; place-items: center; width: 44px; min-height: 44px; padding: 0; }
+/* Her side panel: four ways to show her, sections that fold, and a line
+   on its inner edge that sets its width. */
+.her-grip { position: relative; z-index: 2; flex: none; width: 9px; margin: 0 -4px; display: grid; place-items: center; cursor: col-resize; touch-action: none; }
+.her-grip::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background 0.12s, width 0.12s, left 0.12s; }
+.her-grip:hover::before, .her-grip.dragging::before, .her-grip:focus-visible::before { left: 3px; width: 3px; background: var(--sys); }
+.her-grip > span { position: relative; width: 5px; height: 36px; border-radius: 3px; background: transparent; transition: background 0.12s; }
+.her-grip:hover > span, .her-grip.dragging > span { background: var(--sys); }
+.her-grip:focus-visible { outline: none; }
+body.her-resizing { cursor: col-resize; user-select: none; }
+.her-rail { position: relative; gap: 16px; }
+.her-bar { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.her-views { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); }
+.her-views button { width: 30px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--dim); }
+.her-views button:hover { color: var(--text); }
+.her-views button[aria-pressed='true'] { background: var(--raised); color: var(--nova); }
+.her-feel { font: 500 13px/1.3 var(--display); color: var(--nova); }
+.her-compact { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 12px; }
+.her-compact > :not(.avatar-stage):not(.her-who) { grid-column: 1 / -1; }
+.her-compact .avatar-stage { width: 56px; height: 56px; border-radius: 50%; }
+.her-compact .avatar-wait { display: none; }
+.her-who { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.her-who b { font: 600 17px/1.2 var(--display); }
+.her-mood { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: linear-gradient(160deg, rgba(224, 164, 88, 0.1), rgba(122, 184, 224, 0.06)); }
+.her-mood b { font: 600 20px/1.2 var(--display); }
+.meters.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.meters.row .meter { grid-template-columns: minmax(0, 1fr); gap: 4px; font-size: 12px; }
+.rail .her-fold { flex: none; gap: 0; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel); }
+.her-fold-head { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) 12px; gap: 10px; align-items: center; padding: 11px 12px; border: 0; background: none; color: var(--text); text-align: left; }
+.her-fold-head .label { margin: 0; }
+.her-fold-head:hover .label { color: var(--muted); }
+.her-fold-sum { justify-self: end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.4 var(--mono); color: var(--muted); }
+.her-fold-head svg { color: var(--dim); transition: transform 0.15s; }
+.her-fold.open .her-fold-head svg { transform: rotate(90deg); }
+.her-fold-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; }
+/* Only her: her figure fills the panel and the rest sits over it. */
+.her-rail-only { padding: 0; gap: 0; overflow: hidden; }
+.her-rail-only .her-bar { position: absolute; top: 12px; left: 14px; right: 14px; z-index: 3; }
+.her-rail-only .her-bar .label { color: var(--text); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7); }
+.her-only { flex: 1; min-height: 0; }
+.her-only .avatar-stage { flex: 1; height: auto; min-height: 0; border: 0; border-radius: 0; }
+.her-overlay { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.her-glass { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; background: rgba(11, 14, 23, 0.72); backdrop-filter: blur(8px); font-size: 13px; }
+.her-minis { display: flex; gap: 10px; }
+.her-minis > span { display: flex; align-items: center; gap: 5px; font: 400 11px/1 var(--mono); color: var(--muted); }
+.her-minis i { width: 22px; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
+.her-minis b { display: block; height: 100%; background: var(--nova); }
+.her-details-open { position: absolute; top: 50px; right: 14px; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; background: rgba(11, 14, 23, 0.7); backdrop-filter: blur(8px); color: var(--text); font-size: 12px; }
+.her-drawer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; max-height: 72%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; background: var(--nav); box-shadow: 0 -16px 30px -10px rgba(0, 0, 0, 0.7); }
+.her-drawer-top { display: flex; justify-content: space-between; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .her-grip::before, .her-grip > span, .her-fold-head svg { transition: none; } }
 
 /* Voice picker */
 .voices { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }

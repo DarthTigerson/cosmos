@@ -13,30 +13,6 @@ const faces: Record<string, [Face['expression'], number]> = {
   anger: ['angry', 0.55],
 }
 
-function remembered(key: string, fallback: boolean): boolean {
-  try {
-    const v = localStorage.getItem(key)
-    return v === null ? fallback : v === 'true'
-  } catch {
-    return fallback
-  }
-}
-
-function remember(key: string, value: boolean) {
-  try {
-    localStorage.setItem(key, String(value))
-  } catch { /* the choice just will not be kept */ }
-}
-
-// An arrow for folding her away (up) and bringing her back (down).
-function Arrow({ down }: { down: boolean }) {
-  return (
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" style={down ? undefined : { transform: 'rotate(180deg)' }}>
-      <path d="M3 6l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
 // The words of a line, lower case, without punctuation.
 function wordsOf(line: string): string[] {
   return line.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w.length > 1)
@@ -47,16 +23,21 @@ type Ear = 'off' | 'listening' | 'hearing' | 'writing'
 // Things a speech recogniser writes when it is handed a noise.
 const notSpeech = ['you', 'thank you.', 'thanks for watching!', 'thank you for watching.', 'bye.', '.', 'okay.']
 
+// How she is shown beside the chat: her full figure, a small round one,
+// none at all, or her figure filling the panel with the rest over it.
+export type HerView = 'full' | 'compact' | 'text' | 'only'
+
 // Her figure beside the chat: the 3D model, alive between words. "Talk
 // to her" starts a call that works like a phone call: she listens, she
 // knows when you have finished, she answers aloud as she writes, and
-// she stops if you cut in. There is nothing to hold down.
-export function Avatar({ state, working, onSay }: { state: State | null; working: boolean; onSay: (words: string) => void }) {
+// she stops if you cut in. There is nothing to hold down. A call goes on
+// whichever way she is shown, even with no figure.
+export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string) => void; view: HerView; mindCount: number }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<Stage | null>(null)
   const speaker = useRef<Speaker | null>(null)
   const ears = useRef<Ears | null>(null)
-  const [shown, setShown] = useState(() => remembered('cosmos:avatar', true))
+  const shown = view !== 'text'
   const [ready, setReady] = useState(false)
   const [problem, setProblem] = useState('')
   const [speaking, setSpeaking] = useState(false)
@@ -124,6 +105,11 @@ export function Avatar({ state, working, onSay }: { state: State | null; working
     },
     [],
   )
+
+  const close = view === 'compact'
+  useEffect(() => {
+    stage.current?.setClose(close)
+  }, [close, ready])
 
   const asleep = state?.state === 'asleep'
   const pose = asleep ? 'asleep' : speaking ? 'talking' : working || ear === 'writing' ? 'thinking' : 'idle'
@@ -219,23 +205,6 @@ export function Avatar({ state, working, onSay }: { state: State | null; working
     ears.current?.setMuted(next)
   }
 
-  function show(next: boolean) {
-    setShown(next)
-    remember('cosmos:avatar', next)
-    if (!next) endCall()
-  }
-
-  if (!shown) {
-    return (
-      <div className="avatar-row">
-        <span className="avatar-mood">Feeling {feeling}</span>
-        <button type="button" className="secondary avatar-arrow" aria-label="Show her" title="Show her" onClick={() => show(true)}>
-          <Arrow down />
-        </button>
-      </div>
-    )
-  }
-
   const word = asleep
     ? 'asleep'
     : speaking
@@ -250,46 +219,95 @@ export function Avatar({ state, working, onSay }: { state: State | null; working
               : 'listening'
             : 'here'
   const lit = word === 'talking' || word === 'hearing you' || word === 'thinking'
+  const status = (
+    <span className={`avatar-state ${lit ? 'lit' : ''} ${asleep ? 'asleep' : ''}`} role="status">
+      <i aria-hidden="true" />
+      {word}
+    </span>
+  )
+  const actions = call ? (
+    <div className="avatar-actions">
+      <button type="button" className="secondary" aria-pressed={muted} onClick={toggleMute}>
+        {muted ? 'Unmute' : 'Mute'}
+      </button>
+      <button type="button" className="primary" onClick={endCall}>
+        End the call
+      </button>
+    </div>
+  ) : (
+    <div className="avatar-actions">
+      <button type="button" className="primary" disabled={asleep} onClick={() => void startCall()}>
+        Talk to her
+      </button>
+    </div>
+  )
+  const mood = state?.mood
   return (
-    <div className="avatar">
-      <div className="avatar-stage">
-        <canvas ref={canvas} role="img" aria-label={`${state?.name ?? 'She'}, ${word}`} />
-        {!ready && !problem && <span className="avatar-wait">She is arriving…</span>}
-      </div>
-      <div className="avatar-row">
-        <span className={`avatar-state ${lit ? 'lit' : ''} ${asleep ? 'asleep' : ''}`} role="status">
-          <i aria-hidden="true" />
-          {word}
-        </span>
-        <span className="avatar-mood">
-          {feeling} · warmth {warmth.toFixed(2)}
-        </span>
-      </div>
+    <div className={`avatar her-${view}`}>
+      {shown && (
+        <div className="avatar-stage">
+          <canvas ref={canvas} role="img" aria-label={`${state?.name ?? 'She'}, ${word}`} />
+          {!ready && !problem && <span className="avatar-wait">She is arriving…</span>}
+          {view === 'only' && (
+            <div className="her-overlay">
+              <div className="her-glass">
+                {status}
+                <span className="her-feel">{feeling}</span>
+              </div>
+              {mood && (
+                <div className="her-glass">
+                  <span className="her-minis">
+                    {(
+                      [
+                        ['Warmth', mood.warmth],
+                        ['Energy', mood.energy],
+                        ['Confidence', mood.confidence],
+                      ] as const
+                    ).map(([label, v]) => (
+                      <span key={label} title={`${label} ${v.toFixed(2)}`}>
+                        {label[0]}
+                        <i role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v * 100)}>
+                          <b style={{ width: `${Math.round(v * 100)}%` }} />
+                        </i>
+                      </span>
+                    ))}
+                  </span>
+                  {mindCount > 0 && <span className="sub">{mindCount} on her mind</span>}
+                </div>
+              )}
+              {actions}
+            </div>
+          )}
+        </div>
+      )}
+      {view === 'compact' && (
+        <div className="her-who">
+          <b>{state?.name ?? 'She'}</b>
+          <div className="avatar-row">
+            {status}
+            <span className="her-feel">feeling {feeling}</span>
+          </div>
+        </div>
+      )}
+      {view === 'text' && (
+        <div className="her-mood">
+          {status}
+          <b>Feeling {feeling}</b>
+        </div>
+      )}
+      {view === 'full' && (
+        <div className="avatar-row">
+          {status}
+          <span className="her-feel">feeling {feeling}</span>
+        </div>
+      )}
       {problem && (
         <p className="problem" role="alert">
           {problem}
         </p>
       )}
-      {call ? (
-        <div className="avatar-actions">
-          <button type="button" className="secondary" aria-pressed={muted} onClick={toggleMute}>
-            {muted ? 'Unmute' : 'Mute'}
-          </button>
-          <button type="button" className="primary" onClick={endCall}>
-            End the call
-          </button>
-        </div>
-      ) : (
-        <div className="avatar-actions">
-          <button type="button" className="primary" disabled={asleep} onClick={() => void startCall()}>
-            Talk to her
-          </button>
-          <button type="button" className="secondary avatar-arrow" aria-label="Hide her" title="Hide her" onClick={() => show(false)}>
-            <Arrow down={false} />
-          </button>
-        </div>
-      )}
-      {call && <p className="quiet">Just talk. She answers when you pause, and stops if you speak over her.</p>}
+      {view !== 'only' && actions}
+      {call && view !== 'only' && <p className="quiet">Just talk. She answers when you pause, and stops if you speak over her.</p>}
     </div>
   )
 }

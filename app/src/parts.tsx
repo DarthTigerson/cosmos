@@ -15,14 +15,14 @@ export function Orbit({ size, asleep }: { size: number; asleep?: boolean }) {
   )
 }
 
-export function Meters({ mood }: { mood: Mood }) {
+export function Meters({ mood, row }: { mood: Mood; row?: boolean }) {
   const rows: [string, number][] = [
     ['Warmth', mood.warmth],
     ['Energy', mood.energy],
     ['Confidence', mood.confidence],
   ]
   return (
-    <div className="meters">
+    <div className={row ? 'meters row' : 'meters'}>
       {rows.map(([label, value]) => (
         <div className="meter" key={label}>
           <span>{label}</span>

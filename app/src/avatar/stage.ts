@@ -132,13 +132,22 @@ export class Stage {
     }
   }
 
-  // Head and shoulders, at her eye level.
+  // Head and shoulders, at her eye level; close up, only her face.
+  private close = false
   private frame() {
     const head = this.bone('head')
     const y = head ? head.getWorldPosition(new THREE.Vector3()).y : 1.4
+    this.camera.fov = this.close ? 11 : 26
+    this.camera.updateProjectionMatrix()
     this.camera.position.set(0, y - 0.02, 1.55)
-    this.camera.lookAt(0, y - 0.07, 0)
+    this.camera.lookAt(0, this.close ? y + 0.02 : y - 0.07, 0)
     this.gaze.position.set(0, y, 1.5)
+  }
+
+  // For the small round avatar: her face fills the frame.
+  setClose(close: boolean) {
+    this.close = close
+    this.frame()
   }
 
   private bone(name: VRMHumanBoneName) {
