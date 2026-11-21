@@ -77,19 +77,21 @@ function DayStrip({ cfg }: { cfg: Config }) {
       <div className="set-strip" aria-hidden="true">
         {from > to ? (
           <>
-            <span className="q" style={{ left: 0, width: pct(to) }} />
-            <span className="q" style={{ left: pct(from), right: 0 }} />
+            <span className="set-quiet" style={{ left: 0, width: pct(to) }} />
+            <span className="set-quiet" style={{ left: pct(from), right: 0 }} />
           </>
         ) : (
-          from !== to && <span className="q" style={{ left: pct(from), width: pct(to - from) }} />
+          from !== to && <span className="set-quiet" style={{ left: pct(from), width: pct(to - from) }} />
         )}
-        <span className="mark brief" style={{ left: pct(cfg.brief_hour) }}>
+        <span className="set-tick set-tick-brief" style={{ left: pct(cfg.brief_hour) }}>
           <span>note {pad(cfg.brief_hour)}</span>
         </span>
-        <span className="mark sleep" style={{ left: pct(cfg.sleep_hour) }}>
+        <span className="set-tick set-tick-sleep" style={{ left: pct(cfg.sleep_hour) }}>
           <span>sleep {pad(cfg.sleep_hour)}</span>
         </span>
-        <span className="now" style={{ left: pct(at) }} />
+        <span className="set-tick set-tick-now" style={{ left: pct(at) }}>
+          <span>now</span>
+        </span>
       </div>
       <div className="set-hours" aria-hidden="true">
         {[0, 3, 6, 9, 12, 15, 18, 21].map((h) => (
@@ -98,19 +100,19 @@ function DayStrip({ cfg }: { cfg: Config }) {
       </div>
       <div className="set-legend">
         <span>
-          <i className="quiet" />
+          <i className="set-swatch-quiet" />
           Quiet: she does not start a conversation
         </span>
         <span>
-          <i className="brief" />
+          <i className="set-swatch-brief" />
           Morning note
         </span>
         <span>
-          <i className="sleep" />
+          <i className="set-swatch-sleep" />
           Sleep
         </span>
         <span>
-          <i className="now" />
+          <i className="set-swatch-now" />
           Now
         </span>
       </div>
@@ -245,10 +247,10 @@ export function Settings({ onSaved }: { onSaved: () => void }) {
             {sections.map(([s, label]) => (
               <button key={s} type="button" aria-current={current === s} onClick={() => jump(s)}>
                 {label}
-                {sectionChanged(s) && <i className="dot" aria-label="unsaved changes" />}
+                {sectionChanged(s) && <i className="set-dot" aria-label="unsaved changes" />}
               </button>
             ))}
-            <span className="label sep">Elsewhere</span>
+            <span className="label set-rail-sep">Elsewhere</span>
             <a href="#models">Models →</a>
           </nav>
 

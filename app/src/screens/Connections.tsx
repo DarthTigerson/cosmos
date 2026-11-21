@@ -44,21 +44,21 @@ export function Connections({ list, switches, busy, change, remove, bringIn }: {
             return (
               <li key={c.name}>
                 <div className="set-conn">
-                  <div className="who">
+                  <div className="set-conn-who">
                     <b>{c.name}</b>
                     <span className="sub">
                       {!c.enabled ? 'off' : c.status.error ? `not working: ${c.status.error}` : c.status.running ? `${c.status.tools.length} tools · ${reads} read, ${c.status.tools.length - reads} change` : 'starting'}
                     </span>
                   </div>
-                  <span className="mini">
+                  <span className="set-conn-mini">
                     She may use it
                     <Switch label={`${c.name}: she may use it`} checked={sw.enabled} disabled={busy} onChange={(on) => change(c.name, { enabled: on })} />
                   </span>
-                  <span className="mini">
+                  <span className="set-conn-mini">
                     She may change things
                     <Switch label={`${c.name}: she may change things there`} checked={sw.allow_changes} disabled={busy || !sw.enabled} onChange={(on) => change(c.name, { allow_changes: on })} />
                   </span>
-                  <span className="links">
+                  <span className="set-conn-links">
                     {c.status.tools.length > 0 && (
                       <button type="button" className="linkish" aria-expanded={open === c.name} onClick={() => setOpen(open === c.name ? '' : c.name)}>
                         {open === c.name ? 'Hide tools' : 'Show tools'}
