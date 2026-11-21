@@ -15,6 +15,7 @@ declare global {
       battery(): Promise<BatteryStatus | null>
       setZoom(factor: number): void
       onTextSize(handler: (dir: 'larger' | 'smaller' | 'reset') => void): () => void
+      onToggleNav?(handler: () => void): () => void
     }
   }
 }

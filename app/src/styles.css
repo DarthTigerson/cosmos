@@ -48,14 +48,31 @@ a:hover { color: #a9d3ee; }
 /* ---------- frame ---------- */
 .frame { display: flex; flex-direction: column; height: 100%; }
 .app { flex: 1; min-height: 0; display: flex; }
-.nav { flex: 0 0 232px; width: 232px; min-width: 0; display: flex; flex-direction: column; gap: 24px; background: var(--nav); border-right: 1px solid var(--line-soft); padding: 22px 14px 20px; }
+.nav { position: relative; z-index: 3; flex: 0 0 232px; width: 232px; min-width: 0; display: flex; flex-direction: column; gap: 24px; background: var(--nav); border-right: 1px solid var(--line-soft); padding: 22px 14px 20px; transition: flex-basis 0.18s ease, width 0.18s ease, padding 0.18s ease; }
 .nav nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-.nav-link { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 12px; border-radius: 8px; color: var(--muted); text-decoration: none; }
+.nav-link { position: relative; display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 0 10px; border-radius: 8px; color: var(--muted); text-decoration: none; white-space: nowrap; }
 .nav-link:hover { color: var(--text); background: #141a2b; }
 .nav-link[aria-current='page'] { background: var(--raised); color: var(--text); font-weight: 500; }
+.nav-link[aria-current='page'] .nav-icon { color: var(--nova); }
 .nav-link.last { margin-top: auto; }
+.nav-icon { flex: none; }
+.nav-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nav-link .badge { margin-left: auto; }
+.nav-dot { display: none; position: absolute; top: 8px; right: 12px; width: 7px; height: 7px; border-radius: 50%; background: var(--nova); box-shadow: 0 0 0 2px var(--nav); }
 .nav-nova { display: flex; gap: 4px; }
-.nav-nova .nav-link { flex: 1; }
+.nav-nova .nav-link { flex: 1; min-width: 0; }
+/* Folded: a rail of icons, with each name on hover. */
+.nav.folded { flex-basis: 64px; width: 64px; padding-left: 10px; padding-right: 10px; }
+.nav.folded .nav-link { justify-content: center; gap: 0; padding: 0; }
+.nav.folded .nav-word, .nav.folded .nav-link .badge, .nav.folded .nav-toggle { display: none; }
+.nav.folded .nav-dot { display: block; }
+.nav.folded .nav-link:hover::after, .nav.folded .nav-link:focus-visible::after { content: attr(data-name); position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); z-index: 5; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--raised); color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap; pointer-events: none; }
+/* The half-round tab on the nav's edge, as in vIDE. */
+.nav-fold { position: absolute; top: 50%; right: -15px; transform: translateY(-50%); width: 15px; height: 40px; padding: 0 2px 0 0; display: grid; place-items: center; border: 1px solid var(--line-soft); border-left: 0; border-radius: 0 20px 20px 0; background: var(--nav); color: var(--dim); }
+.nav-fold:hover { color: var(--text); border-color: var(--line-strong); }
+.nav-fold svg { transition: transform 0.18s ease; }
+.nav.folded .nav-fold svg { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .nav, .nav-fold svg { transition: none; } }
 .nav-toggle { flex: 0 0 36px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--muted); }
 .nav-toggle:hover { background: #141a2b; color: var(--text); }
 .nav-toggle svg { transition: transform 0.15s ease; }
@@ -577,9 +594,7 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
   .person-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
-  .nav { flex-basis: 64px; }
-  .nav-link { font-size: 12px; padding: 0 6px; }
-  .brand span, .badge, .footer-left { display: none; }
+  .footer-left { display: none; }
   .footer { justify-content: flex-end; }
   .screen, .chat { padding: 24px 18px; }
   .mem-scroll { margin-right: -18px; padding-right: 18px; }

@@ -128,6 +128,8 @@ function setMenu() {
         { label: 'Larger Text', accelerator: 'CmdOrCtrl+Shift+=', click: size('larger') },
         { label: 'Smaller Text', accelerator: 'CmdOrCtrl+Shift+-', click: size('smaller') },
         { type: 'separator' },
+        { label: 'Fold Side Nav', accelerator: 'CmdOrCtrl+B', click: () => BrowserWindow.getFocusedWindow()?.webContents.send('cosmos:toggle-nav') },
+        { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
     },

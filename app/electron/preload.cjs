@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron')
 
 // The window learns where the core is and the token to reach it, can
 // scale itself for the text size chosen in the footer, and can read the
-// Mac's memory and battery for the title bar.
+// Mac's memory and battery for the title bar. Cmd+B in the View menu
+// folds the side nav.
 contextBridge.exposeInMainWorld('cosmos', {
   conn: () => ipcRenderer.invoke('cosmos:conn'),
   memory: () => ipcRenderer.invoke('cosmos:memory'),
@@ -13,5 +14,10 @@ contextBridge.exposeInMainWorld('cosmos', {
     const listener = (_e, dir) => handler(dir)
     ipcRenderer.on('cosmos:text-size', listener)
     return () => ipcRenderer.removeListener('cosmos:text-size', listener)
+  },
+  onToggleNav: (handler) => {
+    const listener = () => handler()
+    ipcRenderer.on('cosmos:toggle-nav', listener)
+    return () => ipcRenderer.removeListener('cosmos:toggle-nav', listener)
   },
 })
