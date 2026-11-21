@@ -219,7 +219,10 @@ export class Stage {
     if (!b) return
     if (!this.saved.has(b)) this.saved.set(b, new THREE.Quaternion())
     this.saved.get(b)!.copy(b.quaternion)
-    b.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z)))
+    // A VRM 0 model's normalized bones tip the other way about x and z,
+    // so up would be down and a lean left would lean right.
+    const flip = this.vrm?.meta?.metaVersion === '0' ? -1 : 1
+    b.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(x * flip, y, z * flip)))
   }
 
   private update(dt: number) {
