@@ -2,9 +2,35 @@ package brain
 
 import (
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var linkPattern = regexp.MustCompile(`(?i)\bhttps?://[^\s<>"'` + "`" + `]+`)
+
+// unsupportedLinks returns the web addresses in a draft that appear nowhere
+// in the material the writer was given. An address counts as given with
+// or without a closing slash.
+func unsupportedLinks(draft string, given ...string) []string {
+	all := strings.Join(given, "\n")
+	bad := []string{}
+	for _, l := range linkPattern.FindAllString(draft, -1) {
+		// The full stop or bracket after an address belongs to the sentence.
+		l = strings.TrimRight(l, ".,;:!?)]}*")
+		if strings.Contains(all, l) || strings.Contains(all, strings.TrimSuffix(l, "/")) {
+			continue
+		}
+		dup := false
+		for _, b := range bad {
+			dup = dup || b == l
+		}
+		if !dup {
+			bad = append(bad, l)
+		}
+	}
+	return bad
+}
 
 // numbersIn pulls every number out of a text: "14°", "38 km/h", "2.5".
 func numbersIn(text string) []float64 {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -1384,6 +1385,7 @@ func TestMentionedPlanIsNotAdded(t *testing.T) {
 
 type fakeWeb struct {
 	results []WebResult
+	shows   []PodcastShow
 	asked   []string
 }
 
@@ -1395,6 +1397,54 @@ func (f *fakeWeb) Search(_ context.Context, q string) ([]WebResult, error) {
 func (f *fakeWeb) Read(_ context.Context, address string) (WebPage, error) {
 	f.asked = append(f.asked, address)
 	return WebPage{Title: "A page", URL: address, Text: "Some text."}, nil
+}
+
+func (f *fakeWeb) Podcasts(_ context.Context, name string) ([]PodcastShow, error) {
+	f.asked = append(f.asked, name)
+	return f.shows, nil
+}
+
+func TestPodcastFeedTurn(t *testing.T) {
+	r := newRig(t)
+	web := &fakeWeb{shows: []PodcastShow{{Name: "The WAN Show", By: "Linus Tech Tips", Feed: "https://feeds.megaphone.fm/LMG3928170156", Episodes: 414}}}
+	r.b.Web = web
+	r.fake.Handlers["route"] = func(q llm.Request) (string, error) {
+		return `{"intent":"podcasts","mode":"once","steps":[{"tool":"podcasts.find","query":"WAN Show"}]}`, nil
+	}
+	writes := 0
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		writes++
+		if !strings.Contains(q.Messages[len(q.Messages)-1].Content, "https://feeds.megaphone.fm/LMG3928170156") {
+			t.Errorf("the writer was not given the feed: %s", q.Messages[len(q.Messages)-1].Content)
+		}
+		if writes == 1 {
+			return "Here it is: https://www.youtube.com/feeds/videos.xml?channel_id=UCmadeup.", nil
+		}
+		return "Here it is: https://feeds.megaphone.fm/LMG3928170156.", nil
+	}
+	reply, err := r.say("can you find the rss feed for the wan show?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writes != 2 || !strings.Contains(reply.Text, "LMG3928170156") || strings.Contains(reply.Text, "UCmadeup") {
+		t.Fatalf("a made-up address must be sent back and the real one given: %d writes, %q", writes, reply.Text)
+	}
+	if len(web.asked) != 1 || web.asked[0] != "WAN Show" {
+		t.Fatalf("asked = %v", web.asked)
+	}
+}
+
+func TestMadeUpLinksAreFound(t *testing.T) {
+	facts := `{"feed":"https://example.org/feed.xml?a=1&b=2","page":"https://example.com/news/"}`
+	if bad := unsupportedLinks("It is https://example.org/feed.xml?a=1&b=2. Or see (https://example.com/news).", facts); len(bad) != 0 {
+		t.Errorf("addresses from the facts were flagged: %v", bad)
+	}
+	if bad := unsupportedLinks("Try https://example.org/feed2.xml, it should work.", facts); len(bad) != 1 || bad[0] != "https://example.org/feed2.xml" {
+		t.Errorf("a made-up address was not flagged: %v", bad)
+	}
+	if got := factsText([]Fact{{Tool: "web.read", Result: map[string]any{"url": "https://e.org/?a=1&b=2"}}}); !strings.Contains(got, "a=1&b=2") {
+		t.Errorf("an & in an address must stay as it is: %s", got)
+	}
 }
 
 func TestWebSearchTurn(t *testing.T) {
@@ -1481,6 +1531,81 @@ func TestReadPage(t *testing.T) {
 	}
 	if _, err := (&DuckDuckGo{}).Read(context.Background(), "file:///etc/hosts"); err == nil {
 		t.Error("only web addresses may be read")
+	}
+}
+
+func TestReadPageKeepsLinksAndFeeds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, `<html><head><title>The Show</title>
+		<link rel="alternate" type="application/rss+xml" title="Episodes" href="/episodes.rss"></head><body>
+		<main><p>Every week we talk about tech news, and you can <a href="https://example.com/listen?x=1&amp;y=2">listen on our site</a> any time.</p>
+		<ul><li><a href="/subscribe">Subscribe</a></li><li><a href="#top">Top</a></li></ul></main>
+		<footer><a href="https://feeds.example.net/show">RSS</a> <a href="https://player.example/subscribe?url=https://feeds.example.net/show">Player RSS</a></footer></body></html>`)
+	}))
+	defer srv.Close()
+	page, err := (&DuckDuckGo{AllowLocal: true}).Read(context.Background(), srv.URL+"/show/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"listen on our site (https://example.com/listen?x=1&y=2)", "Subscribe (" + srv.URL + "/subscribe)"} {
+		if !strings.Contains(page.Text, want) {
+			t.Errorf("the text should hold %q:\n%s", want, page.Text)
+		}
+	}
+	if strings.Contains(page.Text, "Top") {
+		t.Errorf("a link to the same page is not worth keeping:\n%s", page.Text)
+	}
+	if len(page.Feeds) != 2 || page.Feeds[0] != srv.URL+"/episodes.rss" || page.Feeds[1] != "https://feeds.example.net/show" {
+		t.Errorf("feeds = %v", page.Feeds)
+	}
+}
+
+func TestReadFeeds(t *testing.T) {
+	atom := `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Linus Tech Tips</title>
+	<entry><title>New  video</title><link rel="alternate" href="https://www.youtube.com/watch?v=abc"/><published>2026-11-20T18:00:00+00:00</published></entry></feed>`
+	rss := `<?xml version="1.0"?><rss version="2.0"><channel><title>The WAN Show</title>
+	<item><title>Episode 1</title><link>https://example.com/1</link><pubDate>Fri, 20 Nov 2026 22:00:00 GMT</pubDate></item></channel></rss>`
+	for _, c := range []struct{ kind, body, title, line string }{
+		{"text/xml; charset=UTF-8", atom, "Linus Tech Tips", "- 2026-11-20: New video (https://www.youtube.com/watch?v=abc)"},
+		{"application/rss+xml", rss, "The WAN Show", "- 2026-11-20: Episode 1 (https://example.com/1)"},
+		{"text/html", rss, "The WAN Show", "Episode 1"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", c.kind)
+			io.WriteString(w, c.body)
+		}))
+		page, err := (&DuckDuckGo{AllowLocal: true}).Read(context.Background(), srv.URL)
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", c.kind, err)
+		}
+		if !page.IsFeed || page.Title != c.title || !strings.Contains(page.Text, "working feed.") || !strings.Contains(page.Text, c.line) {
+			t.Errorf("%s: page = %+v", c.kind, page)
+		}
+	}
+}
+
+func TestPodcastDirectory(t *testing.T) {
+	var asked url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = r.URL.Query()
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		io.WriteString(w, `{"resultCount":2,"results":[
+		{"collectionName":"The WAN Show","artistName":"Linus Tech Tips","feedUrl":"https://feeds.megaphone.fm/LMG3928170156","trackCount":414,"releaseDate":"2026-11-21T05:30:00Z","primaryGenreName":"Tech News"},
+		{"collectionName":"No feed here","artistName":"Someone"}]}`)
+	}))
+	defer srv.Close()
+	shows, err := (&DuckDuckGo{AllowLocal: true, Directory: srv.URL}).Podcasts(context.Background(), "wan show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked.Get("term") != "wan show" || asked.Get("media") != "podcast" {
+		t.Errorf("asked = %v", asked)
+	}
+	want := PodcastShow{Name: "The WAN Show", By: "Linus Tech Tips", Feed: "https://feeds.megaphone.fm/LMG3928170156", Episodes: 414, Latest: "2026-11-21", Genre: "Tech News"}
+	if len(shows) != 1 || shows[0] != want {
+		t.Errorf("shows = %+v", shows)
 	}
 }
 
