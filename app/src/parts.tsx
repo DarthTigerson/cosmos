@@ -50,6 +50,11 @@ export function Screen({ eyebrow, title, action, className, children }: { eyebro
   )
 }
 
+// An on/off switch. The label names what it switches.
+export function Switch({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
+  return <button type="button" className="switch" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)} />
+}
+
 export function Problem({ message }: { message: string }) {
   if (!message) return null
   return (
