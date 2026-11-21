@@ -63,7 +63,7 @@ interface RowProps {
 // Each memory shows what it rests on: the thing you said, or for a
 // reflection the moments of the day it came from. Every wording it
 // replaced is kept and can be opened.
-function Row({ m, people, forgotten, onForget, onRestore, onPin, onCorrect }: RowProps) {
+export function Row({ m, people, forgotten, onForget, onRestore, onPin, onCorrect }: RowProps) {
   const [draft, setDraft] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const basis = m.source.split('\n').filter(Boolean)
@@ -132,10 +132,10 @@ function Row({ m, people, forgotten, onForget, onRestore, onPin, onCorrect }: Ro
           </button>
         ) : draft !== null ? (
           <>
-            <button type="button" className="mem-act text" onClick={save}>
+            <button type="button" className="mem-act word" onClick={save}>
               Save
             </button>
-            <button type="button" className="mem-act text quiet" onClick={() => setDraft(null)}>
+            <button type="button" className="mem-act word quiet" onClick={() => setDraft(null)}>
               Cancel
             </button>
           </>

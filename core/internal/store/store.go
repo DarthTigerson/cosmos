@@ -111,6 +111,8 @@ func Open(path string) (*Store, error) {
 		{"events", "session_id INTEGER NOT NULL DEFAULT 0"},
 		{"calendar", "repeat TEXT NOT NULL DEFAULT ''"},
 		{"episodes", "thoughts TEXT NOT NULL DEFAULT '[]'"},
+		{"people", "locked TEXT NOT NULL DEFAULT '[]'"},
+		{"people", "forgotten INTEGER NOT NULL DEFAULT 0"},
 	} {
 		name, _, _ := strings.Cut(add[1], " ")
 		var n int
@@ -246,6 +248,28 @@ func (s *Store) RecentEvents(n int, kinds ...string) ([]Event, error) {
 		evs[i], evs[j] = evs[j], evs[i]
 	}
 	return evs, err
+}
+
+// EventsMentioning returns the events of the given kinds whose text
+// contains any of the words, newest first. It is a rough filter: callers
+// check for whole words themselves.
+func (s *Store) EventsMentioning(words []string, kinds ...string) ([]Event, error) {
+	if len(words) == 0 {
+		return []Event{}, nil
+	}
+	likes := make([]string, len(words))
+	args := []any{}
+	for i, w := range words {
+		likes[i] = `lower(text) LIKE ?`
+		args = append(args, "%"+strings.ToLower(w)+"%")
+	}
+	clause, extra := kindFilter(kinds)
+	args = append(args, extra...)
+	rows, err := s.db.Query(`SELECT id,at,kind,actor,text,importance,meta,session_id FROM events WHERE (`+strings.Join(likes, " OR ")+`)`+clause+` ORDER BY at DESC,id DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return scanEvents(rows)
 }
 
 // SessionEvents returns the last n events of a session in the given kinds,
@@ -560,10 +584,56 @@ type Person struct {
 	Closeness     float64   `json:"closeness"` // 0 stranger .. 1 closest
 	Notes         string    `json:"notes"`
 	LastMentioned time.Time `json:"last_mentioned"`
+	// Locked names the fields the user set by hand ("relationship",
+	// "closeness", ...). What she learns from conversation leaves them be.
+	Locked []string `json:"locked"`
 }
 
+// Has reports whether the user set this field by hand.
+func (p Person) Has(field string) bool {
+	for _, f := range p.Locked {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
+// People returns everyone she knows, closest first. People the user
+// asked her to forget are left out.
 func (s *Store) People() ([]Person, error) {
-	rows, err := s.db.Query(`SELECT id,name,aliases,relationship,closeness,notes,last_mentioned FROM people ORDER BY closeness DESC, name`)
+	return s.queryPeople(`WHERE forgotten=0 ORDER BY closeness DESC, name`)
+}
+
+// Forgotten reports whether the user asked her to forget someone by this
+// name, so conversation does not bring them back.
+func (s *Store) Forgotten(name string) bool {
+	want := strings.ToLower(strings.TrimSpace(name))
+	gone, _ := s.queryPeople(`WHERE forgotten=1`)
+	for _, p := range gone {
+		for _, n := range append([]string{p.Name}, p.Aliases...) {
+			if strings.ToLower(n) == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Store) ForgetPerson(id int64) error {
+	_, err := s.db.Exec(`UPDATE people SET forgotten=1 WHERE id=?`, id)
+	return err
+}
+
+// DeletePerson removes someone outright, as when they are merged into
+// another person.
+func (s *Store) DeletePerson(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM people WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) queryPeople(where string, args ...any) ([]Person, error) {
+	rows, err := s.db.Query(`SELECT id,name,aliases,relationship,closeness,notes,last_mentioned,locked FROM people `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -571,14 +641,18 @@ func (s *Store) People() ([]Person, error) {
 	out := []Person{}
 	for rows.Next() {
 		var p Person
-		var aliases string
+		var aliases, locked string
 		var lm int64
-		if err := rows.Scan(&p.ID, &p.Name, &aliases, &p.Relationship, &p.Closeness, &p.Notes, &lm); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &aliases, &p.Relationship, &p.Closeness, &p.Notes, &lm, &locked); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(aliases), &p.Aliases)
 		if p.Aliases == nil {
 			p.Aliases = []string{}
+		}
+		json.Unmarshal([]byte(locked), &p.Locked)
+		if p.Locked == nil {
+			p.Locked = []string{}
 		}
 		p.LastMentioned = fromMs(lm)
 		out = append(out, p)
@@ -611,18 +685,22 @@ func (s *Store) SavePerson(p Person, now time.Time) (Person, error) {
 	if p.Aliases == nil {
 		p.Aliases = []string{}
 	}
+	if p.Locked == nil {
+		p.Locked = []string{}
+	}
 	aliases, _ := json.Marshal(p.Aliases)
+	locked, _ := json.Marshal(p.Locked)
 	if p.ID == 0 {
-		res, err := s.db.Exec(`INSERT INTO people(name,aliases,relationship,closeness,notes,last_mentioned,created_at) VALUES(?,?,?,?,?,?,?)`,
-			p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), ms(now))
+		res, err := s.db.Exec(`INSERT INTO people(name,aliases,relationship,closeness,notes,last_mentioned,created_at,locked) VALUES(?,?,?,?,?,?,?,?)`,
+			p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), ms(now), string(locked))
 		if err != nil {
 			return p, err
 		}
 		p.ID, _ = res.LastInsertId()
 		return p, nil
 	}
-	_, err := s.db.Exec(`UPDATE people SET name=?,aliases=?,relationship=?,closeness=?,notes=?,last_mentioned=? WHERE id=?`,
-		p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), p.ID)
+	_, err := s.db.Exec(`UPDATE people SET name=?,aliases=?,relationship=?,closeness=?,notes=?,last_mentioned=?,locked=? WHERE id=?`,
+		p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), string(locked), p.ID)
 	return p, err
 }
 

@@ -185,12 +185,26 @@ export interface Person {
   closeness: number
   notes: string
   last_mentioned: string
+  // Fields the user set by hand: "name", "relationship", "aliases", "closeness".
+  locked: string[]
+  // For someone she cannot place yet: the last thing you said about them.
+  heard?: string
+}
+
+export interface Connection {
+  id: number
+  name: string
+  relationship: string
+  shared: number
 }
 
 export interface PersonDetail {
   person: Person
   memories: Memory[]
   moments: StreamEvent[]
+  mentions: number
+  weeks: number[]
+  connections: Connection[]
   user: string
 }
 
@@ -314,7 +328,7 @@ export interface ModelsView {
 }
 
 export interface Signal {
-  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing' | 'memories'
+  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing' | 'memories' | 'people'
   data: unknown
 }
 

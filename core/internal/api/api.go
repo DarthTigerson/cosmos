@@ -68,6 +68,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/memories", s.auth(s.memories))
 	mux.HandleFunc("GET /api/people", s.auth(s.people))
 	mux.HandleFunc("GET /api/people/{id}", s.auth(s.person))
+	mux.HandleFunc("PUT /api/people/{id}", s.auth(s.changePerson))
+	mux.HandleFunc("POST /api/people/{id}/merge", s.auth(s.mergePerson))
+	mux.HandleFunc("POST /api/people/{id}/forget", s.auth(s.forgetPerson))
 	mux.HandleFunc("GET /api/calendar", s.auth(s.calendar))
 	mux.HandleFunc("GET /api/podcasts", s.auth(s.podcasts))
 	mux.HandleFunc("POST /api/podcasts/feeds", s.auth(s.addFeed))
@@ -535,73 +538,109 @@ func (s *Server) putVoice(w http.ResponseWriter, r *http.Request) {
 	s.getVoice(w, r)
 }
 
+// people lists everyone she knows. Someone whose relationship she does
+// not know yet comes with the last thing the user said about them, so the
+// screen can ask who they are.
 func (s *Server) people(w http.ResponseWriter, r *http.Request) {
 	people, err := s.B.S.People()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, people)
+	type view struct {
+		store.Person
+		Heard string `json:"heard,omitempty"`
+	}
+	out := make([]view, len(people))
+	for i, p := range people {
+		out[i] = view{Person: p}
+		if strings.TrimSpace(p.Relationship) == "" {
+			out[i].Heard = s.B.Heard(p)
+		}
+	}
+	writeJSON(w, 200, out)
 }
 
-// person gathers everything she holds about one person: the record
-// itself, the memories that mention them and the recent moments where
-// they came up.
+// person is one person in full: the memories and moments that name them,
+// how often they come up, and who is named alongside them.
 func (s *Server) person(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		fail(w, 400, "bad id")
 		return
 	}
-	people, err := s.B.S.People()
+	view, err := s.B.Person(id)
 	if err != nil {
-		fail(w, 500, err.Error())
+		s.personFail(w, err)
 		return
 	}
-	var found *store.Person
-	for i := range people {
-		if people[i].ID == id {
-			found = &people[i]
-		}
-	}
-	if found == nil {
-		fail(w, 404, "no such person")
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) personFail(w http.ResponseWriter, err error) {
+	if brain.IsNoPerson(err) {
+		fail(w, 404, err.Error())
 		return
 	}
-	names := []string{strings.ToLower(found.Name)}
-	for _, a := range found.Aliases {
-		if a = strings.ToLower(strings.TrimSpace(a)); a != "" {
-			names = append(names, a)
-		}
+	fail(w, 400, err.Error())
+}
+
+// changePerson applies an edit the user made by hand.
+func (s *Server) changePerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
 	}
-	// A full name also matches on its first word ("Bethany Bonnici").
-	if first, _, ok := strings.Cut(names[0], " "); ok && len(first) >= 3 {
-		names = append(names, first)
+	var in brain.PersonEdit
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable change: "+err.Error())
+		return
 	}
-	mentions := func(text string) bool {
-		t := strings.ToLower(text)
-		for _, n := range names {
-			if strings.Contains(t, n) {
-				return true
-			}
-		}
-		return false
+	p, err := s.B.EditPerson(id, in)
+	if err != nil {
+		s.personFail(w, err)
+		return
 	}
-	memories := []store.Memory{}
-	all, _ := s.B.S.Memories()
-	for _, m := range all {
-		if mentions(m.Content) {
-			memories = append(memories, m)
-		}
+	s.B.Bus.Publish("people", nil)
+	writeJSON(w, 200, p)
+}
+
+// mergePerson folds one person into another: {"into": id}.
+func (s *Server) mergePerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
 	}
-	moments := []store.Event{}
-	recent, _ := s.B.S.RecentEvents(400, "user_msg", "nova_msg", "initiative")
-	for i := len(recent) - 1; i >= 0 && len(moments) < 12; i-- {
-		if mentions(recent[i].Text) {
-			moments = append(moments, recent[i])
-		}
+	var in struct {
+		Into int64 `json:"into"`
 	}
-	writeJSON(w, 200, map[string]any{"person": found, "memories": memories, "moments": moments, "user": s.B.Cfg.Get().UserName})
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable merge: "+err.Error())
+		return
+	}
+	p, err := s.B.MergePerson(id, in.Into)
+	if err != nil {
+		s.personFail(w, err)
+		return
+	}
+	s.B.Bus.Publish("people", nil)
+	writeJSON(w, 200, p)
+}
+
+func (s *Server) forgetPerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	if err := s.B.ForgetPerson(id); err != nil {
+		s.personFail(w, err)
+		return
+	}
+	s.B.Bus.Publish("people", nil)
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) calendar(w http.ResponseWriter, r *http.Request) {

@@ -474,7 +474,8 @@ func (b *Brain) findKnown(name string) (store.Person, bool) {
 func (b *Brain) rememberPerson(name, relationship, note string, now time.Time) {
 	name = strings.TrimSpace(name)
 	cfg := b.Cfg.Get()
-	if name == "" || strings.EqualFold(name, cfg.UserName) || strings.EqualFold(name, cfg.CompanionName) {
+	// Someone the user asked her to forget is not taken up again.
+	if name == "" || strings.EqualFold(name, cfg.UserName) || strings.EqualFold(name, cfg.CompanionName) || b.S.Forgotten(name) {
 		return
 	}
 	relationship = strings.TrimSpace(relationship)
@@ -490,12 +491,15 @@ func (b *Brain) rememberPerson(name, relationship, note string, now time.Time) {
 		if note != "" && !strings.Contains(norm(p.Notes), norm(note)) {
 			p.Notes = strings.TrimSpace(p.Notes + "\n" + note)
 		}
-		if relationship != "" && (placeholder(p.Relationship) || closenessFor(relationship) > p.Closeness) {
+		// What the user set by hand stands over what she picks up.
+		if relationship != "" && !p.Has("relationship") && (placeholder(p.Relationship) || closenessFor(relationship) > p.Closeness) {
 			p.Relationship = relationship
-			p.Closeness = closenessFor(relationship)
+			if !p.Has("closeness") {
+				p.Closeness = closenessFor(relationship)
+			}
 		}
 		// Learning the full name keeps the short one as another name.
-		if len(name) > len(p.Name) && strings.HasPrefix(strings.ToLower(name), strings.ToLower(p.Name)+" ") {
+		if !p.Has("name") && len(name) > len(p.Name) && strings.HasPrefix(strings.ToLower(name), strings.ToLower(p.Name)+" ") {
 			p.Aliases = append(p.Aliases, p.Name)
 			p.Name = name
 		}

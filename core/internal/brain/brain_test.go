@@ -2040,3 +2040,89 @@ func TestSheAsksEvenAfterAQuestionOfHerOwn(t *testing.T) {
 		}
 	}
 }
+
+func TestNamesMatchAsWholeWords(t *testing.T) {
+	names := PersonNames(store.Person{Name: "Tom Bonnici", Aliases: []string{"Tommy"}})
+	for text, want := range map[string]bool{
+		"I'll see you tomorrow.":    false,
+		"Tom's bike is broken.":     true,
+		"Tommy came over.":          true,
+		"Bonnici family dinner.":    false,
+		"we linked the two topics.": false,
+	} {
+		if got := Mentions(text, names); got != want {
+			t.Errorf("Mentions(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestWhatTheUserSetIsNotOverwritten(t *testing.T) {
+	r := newRig(t)
+	p, _ := r.b.S.SavePerson(store.Person{Name: "Bethany", Closeness: 0.3}, r.now)
+	rel := "friend"
+	if _, err := r.b.EditPerson(p.ID, PersonEdit{Relationship: &rel}); err != nil {
+		t.Fatal(err)
+	}
+	r.fake.Handlers["capture"] = func(llm.Request) (string, error) {
+		return `{"changes":[],"people":[{"name":"Bethany","relationship":"wife","note":"Works nights."}]}`, nil
+	}
+	if _, err := r.say("My wife Bethany works nights."); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := r.b.S.FindPerson("bethany")
+	if got.Relationship != "friend" || got.Closeness != 0.7 || !strings.Contains(got.Notes, "Works nights.") {
+		t.Fatalf("a relationship the user set should stand, notes still grow: %+v", got)
+	}
+}
+
+func TestMergingKeepsNamesNotesAndRelationship(t *testing.T) {
+	r := newRig(t)
+	beth, _ := r.b.S.SavePerson(store.Person{Name: "Beth", Notes: "Says hi.", Closeness: 0.3}, r.now)
+	bethany, _ := r.b.S.SavePerson(store.Person{Name: "Bethany", Relationship: "wife", Closeness: 0.9, Notes: "Works nights."}, r.now)
+	into, err := r.b.MergePerson(beth.ID, bethany.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	people, _ := r.b.S.People()
+	if len(people) != 1 || into.Relationship != "wife" || len(into.Aliases) != 1 || into.Aliases[0] != "Beth" || into.Notes != "Works nights.\nSays hi." {
+		t.Fatalf("the duplicate should fold into the real person: %+v %+v", into, people)
+	}
+}
+
+func TestAForgottenPersonStaysForgotten(t *testing.T) {
+	r := newRig(t)
+	p, _ := r.b.S.SavePerson(store.Person{Name: "Rex", Closeness: 0.3}, r.now)
+	if err := r.b.ForgetPerson(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	r.fake.Handlers["capture"] = func(llm.Request) (string, error) {
+		return `{"changes":[],"people":[{"name":"Rex","relationship":"","note":"Barks at night."}]}`, nil
+	}
+	if _, err := r.say("Rex kept me up all night."); err != nil {
+		t.Fatal(err)
+	}
+	if people, _ := r.b.S.People(); len(people) != 0 {
+		t.Fatalf("a forgotten person should not come back: %+v", people)
+	}
+}
+
+func TestPersonViewCountsMentionsAndConnections(t *testing.T) {
+	r := newRig(t)
+	link, _ := r.b.S.SavePerson(store.Person{Name: "Link", Relationship: "son", Closeness: 0.9}, r.now)
+	r.b.S.SavePerson(store.Person{Name: "Bethany", Relationship: "wife", Closeness: 0.9}, r.now)
+	r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Bethany and Link went to the beach.", CreatedAt: r.now})
+	r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "The two topics are linked.", CreatedAt: r.now})
+	r.b.S.AddEvent(store.Event{At: r.now.Add(-time.Hour), Kind: "user_msg", Text: "Link lost a tooth."})
+	r.b.S.AddEvent(store.Event{At: r.now.Add(-20 * 24 * time.Hour), Kind: "user_msg", Text: "Link started school."})
+	r.b.S.AddEvent(store.Event{At: r.now, Kind: "user_msg", Text: "Here is the link to it."})
+	view, err := r.b.Person(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Memories) != 1 || view.Mentions != 2 || view.Weeks[11] != 1 || view.Weeks[9] != 1 {
+		t.Fatalf("only whole-word mentions should count: %+v", view)
+	}
+	if len(view.Connections) != 1 || view.Connections[0].Name != "Bethany" {
+		t.Fatalf("Bethany is named alongside Link: %+v", view.Connections)
+	}
+}
