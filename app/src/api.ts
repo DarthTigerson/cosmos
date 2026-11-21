@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Signal } from './types'
+import type { BatteryStatus, MemoryBreakdown, MemoryUsage, Signal } from './types'
 
 interface Conn {
   baseUrl: string
@@ -10,6 +10,9 @@ declare global {
   interface Window {
     cosmos?: {
       conn(): Promise<Conn>
+      memory(): Promise<MemoryUsage>
+      memoryBreakdown(): Promise<MemoryBreakdown>
+      battery(): Promise<BatteryStatus | null>
       setZoom(factor: number): void
       onTextSize(handler: (dir: 'larger' | 'smaller' | 'reset') => void): () => void
     }

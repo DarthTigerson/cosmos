@@ -317,3 +317,25 @@ export interface StepSignal {
   ok?: boolean
   ms?: number
 }
+
+// The Mac itself, read by the Electron shell (electron/system.cjs).
+export interface MemoryUsage {
+  usedBytes: number
+  totalBytes: number
+  swapUsedBytes: number
+  compressedBytes: number
+  pressure: 'normal' | 'warn' | 'critical'
+}
+
+export interface MemoryBreakdown {
+  appBytes: number
+  coreBytes: number
+  models: { port: number; bytes: number }[]
+}
+
+export interface BatteryStatus {
+  percent: number
+  charging: boolean
+  pluggedIn: boolean
+  minutesLeft: number | null
+}

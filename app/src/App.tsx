@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, useLoad, useSignals } from './api'
 import { clock } from './format'
 import { Footer } from './Footer'
+import { TitleBar } from './TitleBar'
 import { Orbit, Problem } from './parts'
 import { Calendar } from './screens/Calendar'
 import { Lists } from './screens/Lists'
@@ -64,9 +65,9 @@ export function App() {
 
   return (
     <div className="frame">
+      <TitleBar title={labels[screen]} />
       <div className="app">
         <aside className="nav">
-          <div className="drag" />
           <div className="brand">
             <Orbit size={26} asleep={asleep} />
             <span>Cosmos Platform</span>

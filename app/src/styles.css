@@ -48,8 +48,7 @@ a:hover { color: #a9d3ee; }
 /* ---------- frame ---------- */
 .frame { display: flex; flex-direction: column; height: 100%; }
 .app { flex: 1; min-height: 0; display: flex; }
-.nav { flex: 0 0 232px; width: 232px; min-width: 0; display: flex; flex-direction: column; gap: 24px; background: var(--nav); border-right: 1px solid var(--line-soft); padding: 0 14px 20px; }
-.drag { height: 44px; -webkit-app-region: drag; margin: 0 -14px; }
+.nav { flex: 0 0 232px; width: 232px; min-width: 0; display: flex; flex-direction: column; gap: 24px; background: var(--nav); border-right: 1px solid var(--line-soft); padding: 22px 14px 20px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; font: 600 19px/1 var(--display); letter-spacing: 0.01em; }
 .nav nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .nav-link { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 12px; border-radius: 8px; color: var(--muted); text-decoration: none; }
@@ -529,3 +528,26 @@ kbd { display: inline-block; padding: 0 4px; border: 1px solid var(--line); bord
 .clock-time { font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .clock-next-mark { display: flex; color: var(--muted); }
 .clock-next-mark svg { width: 12px; height: 12px; }
+
+/* ---------- title bar ----------
+   After vIDE's. The window's buttons sit at its left end; it drags the
+   window everywhere but on the pills. Their details drop down from it. */
+.titlebar { position: relative; z-index: 35; flex: none; height: 32px; display: flex; align-items: center; justify-content: center; background: var(--nav); border-bottom: 1px solid var(--line-soft); -webkit-app-region: drag; user-select: none; }
+.titlebar-title { font: 500 13px/1 var(--body); color: var(--muted); }
+.titlebar-right { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 10px; -webkit-app-region: no-drag; }
+.titlebar-rule { width: 1px; height: 14px; background: var(--line); }
+.tb-pill { position: relative; display: flex; align-items: center; gap: 6px; height: 24px; font: 500 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); cursor: default; }
+.tb-pill svg { flex: none; }
+.tb-pill.warn, .pressure.warn { color: #e0b34a; }
+.tb-pill.critical, .pressure.critical, .tb-pill.low { color: #e5534b; }
+.tb-bar { width: 32px; height: 6px; flex: none; overflow: hidden; border-radius: 3px; background: var(--line); }
+.tb-bar > span { display: block; height: 100%; border-radius: 3px; background: currentColor; transition: width 0.4s ease-out; }
+.tb-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; width: 12rem; padding: 10px; display: flex; flex-direction: column; gap: 6px; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); font: 400 12px/1.3 var(--body); color: var(--text); }
+.tb-panel.wide { width: 17rem; }
+.tb-line, .tb-total, .tb-sub { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tb-line > span:first-child { color: var(--muted); }
+.tb-line > span:last-child, .tb-total > span:last-child, .tb-sub > span:last-child { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tb-total { margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tb-sub { padding-left: 12px; }
+.tb-sub > span:first-child { color: var(--muted); }
+.tb-sub.dim > span:last-child { color: var(--dim); font-weight: 400; }

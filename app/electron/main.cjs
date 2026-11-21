@@ -6,6 +6,7 @@ const crypto = require('node:crypto')
 const fs = require('node:fs')
 const net = require('node:net')
 const path = require('node:path')
+const system = require('./system.cjs')
 
 let core = null
 let conn = null
@@ -141,7 +142,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 18 },
+    trafficLightPosition: { x: 14, y: 10 },
     backgroundColor: '#0b0e17',
     show: !process.env.COSMOS_SCREENSHOT_DIR,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
@@ -222,6 +223,9 @@ app.whenReady().then(async () => {
     return
   }
   ipcMain.handle('cosmos:conn', () => conn)
+  ipcMain.handle('cosmos:memory', () => system.memory())
+  ipcMain.handle('cosmos:memory-breakdown', () => system.breakdown(app.getAppMetrics().map((p) => p.pid)))
+  ipcMain.handle('cosmos:battery', () => system.battery())
   setMenu()
   const win = createWindow()
   if (process.env.COSMOS_SCREENSHOT_DIR) screenshots(win, process.env.COSMOS_SCREENSHOT_DIR)
