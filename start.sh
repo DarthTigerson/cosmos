@@ -1,39 +1,34 @@
 #!/bin/bash
+# Starts Cosmos: builds Nova's core, then opens the app.
+#   ./start.sh        normal start
+#   ./start.sh dev    start with live reload, for working on the app
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$(dirname "$0")/app"
 
-# Kill any leftover processes from a previous run
-echo "Cleaning up any existing processes..."
-lsof -ti :8002 | xargs kill -9 2>/dev/null || true
-lsof -ti :5173 | xargs kill -9 2>/dev/null || true
-sleep 1
+if ! command -v go >/dev/null 2>&1; then
+  echo "Go is needed to build the core. Install it with: brew install go" >&2
+  exit 1
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "Node is needed to run the app. Install it with: brew install node" >&2
+  exit 1
+fi
 
-echo "Starting Cosmos backend..."
-cd "$SCRIPT_DIR/backend"
-source /Users/thomas/.local/bin/env
-uv run uvicorn main:app --host 0.0.0.0 --port 8002 --reload &
-BACKEND_PID=$!
+if [ ! -d "node_modules" ]; then
+  echo "Installing dependencies..."
+  npm install
+fi
 
-echo "Starting Cosmos frontend..."
-cd "$SCRIPT_DIR/frontend"
-npm run dev &
-FRONTEND_PID=$!
+# Electron's postinstall sometimes skips the binary download without saying so.
+# Run it again if path.txt is missing (safe to run when already installed).
+if [ ! -f "node_modules/electron/path.txt" ]; then
+  echo "Downloading Electron..."
+  node node_modules/electron/install.js
+fi
 
-echo ""
-echo "Cosmos is running."
-echo "  vmlx:     http://localhost:8080"
-echo "  Backend:  http://localhost:8002"
-echo "  Frontend: http://localhost:5173"
-echo ""
-echo "Press Ctrl+C to stop."
-
-cleanup() {
-    echo "Stopping Cosmos..."
-    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
-    lsof -ti :8002 | xargs kill -9 2>/dev/null || true
-    lsof -ti :5173 | xargs kill -9 2>/dev/null || true
-    echo "Cosmos stopped."
-}
-trap cleanup INT TERM
-wait
+if [ "$1" = "dev" ]; then
+  npm run dev
+else
+  npm start
+fi

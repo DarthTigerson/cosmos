@@ -1,0 +1,32 @@
+{
+  "name": "cosmos",
+  "version": "0.1.0",
+  "description": "Cosmos: the home of Nova, a local companion",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "core": "cd ../core && go build -o bin/cosmos-core ./cmd/cosmos-core",
+    "dev": "npm run core && node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "npm run core && npm run build && electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@pixiv/three-vrm": "^3.4.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.4.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
