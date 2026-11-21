@@ -412,10 +412,6 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
   .people-list, .people-detail { overflow: visible; padding-bottom: 0; }
   .person-top, .person-scroll { max-height: none; overflow: visible; }
   .person-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pod-screen { overflow-y: auto; }
-  .pod-layout { grid-template-columns: minmax(0, 1fr); margin-bottom: 0; }
-  .pod-rail, .pod-main { overflow: visible; padding-bottom: 0; }
-  .pod-episode { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
   .nav { flex-basis: 64px; }
@@ -427,15 +423,9 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
   .person-head { grid-template-columns: auto minmax(0, 1fr); }
   .person-head .actions { grid-column: 1 / -1; }
   .person-fields { grid-template-columns: minmax(0, 1fr); }
-  .pod-now, .pod-show-head { grid-template-columns: 56px minmax(0, 1fr); }
-  .pod-art.big { width: 56px; height: 56px; font-size: 22px; }
-  .pod-show-head .secondary { grid-column: 1 / -1; justify-self: start; }
-  .pod-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pod-heard-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fill, .pod-stages .bar i { transition: none; }
-  .pod-stages .bar.busy i { animation: none; }
+  .fill { transition: none; }
   .bell-ring svg, .peek-drain, .notes-peek li { animation: none; }
   .state.starting i { animation: none; }
 }
@@ -523,17 +513,61 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
 .pod-confirm span { flex: 1 1 260px; }
 .pod-confirm .secondary { min-height: 36px; font-size: 13px; }
 .pod-back { align-self: flex-start; min-height: 28px; }
-.pod-episode { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 28px 40px; align-items: start; }
-.pod-col { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
-.pod-kept li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line-soft); font-size: 14px; }
+/* An open episode: the header and tabs stay put; one scroll below holds
+   what she kept, with her notes held beside it. */
+.pod-main.episode { overflow: hidden; padding-bottom: 0; gap: 0; }
+.pod-ep { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pod-ep-top { flex: none; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--line-soft); position: relative; z-index: 1; }
+.pod-ep-top.scrolled { box-shadow: 0 10px 18px -14px rgba(0, 0, 0, 0.9); }
+.pod-jump { display: flex; gap: 2px; margin-bottom: -1px; overflow-x: auto; }
+.pod-jump button { padding: 0 12px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 14px; white-space: nowrap; }
+.pod-jump button:hover { color: var(--text); }
+.pod-jump button[aria-current='true'] { color: var(--text); border-bottom-color: var(--nova); }
+.pod-jump .n { margin-left: 5px; font: 400 11px/1 var(--mono); color: var(--dim); }
+.pod-ep-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: 24px 4px 60px 0; container-type: size; }
+.pod-episode { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 440px); gap: 28px 44px; align-items: start; }
+.pod-col { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
+.pod-summary { font-size: 16px; line-height: 1.65; max-width: 80ch; }
+.pod-bring { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; border-left: 3px solid var(--nova); border-radius: 0 10px 10px 0; background: rgba(224, 164, 88, 0.08); font-size: 14px; }
+.pod-bring .label { color: var(--nova); }
+.pod-kept li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line-soft); font-size: 14px; }
 .pod-kept li:first-child { border-top: 0; }
-.pod-kept.hers li span { border-left: 2px solid var(--sys); padding-left: 10px; }
-.pod-bring { padding: 12px 16px; border-radius: 10px; background: rgba(224, 164, 88, 0.08); border: 1px solid rgba(224, 164, 88, 0.35); font-size: 14px; }
-.pod-parts li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--line-soft); font-size: 14px; }
-.pod-parts li:first-child { border-top: 0; }
-.pod-parts .at { font: 400 12px/1.4 var(--mono); color: var(--nova); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.pod-kept .num { font: 400 12px/1.9 var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; }
+.pod-kept.hers { display: flex; flex-direction: column; gap: 8px; }
+.pod-kept.hers li { grid-template-columns: minmax(0, 1fr) auto; padding: 12px 16px; border: 0; border-radius: 10px; background: rgba(122, 184, 224, 0.1); }
+.pod-notes { position: sticky; top: 0; max-height: calc(100cqh - 30px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+.pod-timeline { position: relative; display: flex; flex-direction: column; }
+.pod-timeline::before { content: ''; position: absolute; left: 27px; top: 8px; bottom: 8px; width: 1px; background: var(--line-strong); }
+.pod-timeline li { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 14px; padding: 8px 0; }
+.pod-timeline .at { position: relative; text-align: center; padding-top: 2px; font: 400 12px/1.6 var(--mono); color: var(--nova); font-variant-numeric: tabular-nums; }
+.pod-timeline .at span { position: relative; padding: 2px 4px; border-radius: 4px; background: var(--ground); }
+.pod-timeline button { display: flex; flex-direction: column; gap: 4px; padding: 0; border: 0; background: none; text-align: left; font-size: 14px; color: var(--muted); }
+.pod-timeline .text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pod-timeline .open .text { -webkit-line-clamp: unset; color: var(--text); }
+.pod-timeline .hint { font: 400 11px/1 var(--mono); color: var(--sys); }
 .pod-transcript { white-space: pre-wrap; font-size: 14px; color: var(--muted); max-height: 50vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .pod-transcript mark { background: var(--nova); color: var(--ground); border-radius: 2px; }
+
+/* Podcasts on a narrow window: these follow the rules above so they win. */
+@media (max-width: 1000px) {
+  .pod-screen { overflow-y: auto; }
+  .pod-layout { grid-template-columns: minmax(0, 1fr); margin-bottom: 0; }
+  .pod-rail, .pod-main { overflow: visible; padding-bottom: 0; }
+  .pod-episode { grid-template-columns: minmax(0, 1fr); }
+  .pod-main.episode, .pod-ep-body { overflow: visible; container-type: normal; }
+  .pod-notes { position: static; max-height: none; }
+}
+@media (max-width: 760px) {
+  .pod-now, .pod-show-head { grid-template-columns: 56px minmax(0, 1fr); }
+  .pod-art.big { width: 56px; height: 56px; font-size: 22px; }
+  .pod-show-head .secondary { grid-column: 1 / -1; justify-self: start; }
+  .pod-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pod-heard-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pod-stages .bar i { transition: none; }
+  .pod-stages .bar.busy i { animation: none; }
+}
 
 /* Connections */
 .connections { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }

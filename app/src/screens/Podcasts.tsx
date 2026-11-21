@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, useAsset, useLoad, useSignals } from '../api'
 import { isZero, longDate, when } from '../format'
 import { Empty, Problem, Screen } from '../parts'
@@ -320,10 +320,49 @@ function Transcript({ id }: { id: number }) {
   )
 }
 
-// One episode opened: all she kept, her notes part by part, the transcript.
+// Her notes as a timeline. Each part shows two lines until opened.
+function Parts({ notes }: { notes: Episode['notes'] }) {
+  const [open, setOpen] = useState<Set<number>>(() => new Set([0]))
+  const toggle = (i: number) =>
+    setOpen((was) => {
+      const next = new Set(was)
+      if (!next.delete(i)) next.add(i)
+      return next
+    })
+  return (
+    <ol className="pod-timeline">
+      {notes.map((n, i) => (
+        <li key={i} className={open.has(i) ? 'open' : undefined}>
+          <span className="at">
+            <span>{n.at}</span>
+          </span>
+          <button type="button" aria-expanded={open.has(i)} onClick={() => toggle(i)}>
+            <span className="text">{n.text}</span>
+            <span className="hint">{open.has(i) ? 'fold' : 'read part'}</span>
+          </button>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+const sections = [
+  ['short', 'In short'],
+  ['hers', 'Her thoughts'],
+  ['hosts', 'Hosts said'],
+  ['transcript', 'Transcript'],
+] as const
+type Section = (typeof sections)[number][0]
+
+// One episode opened. The header and the section tabs stay put; below
+// them one scroll holds what she kept, with her notes beside it. The tabs
+// jump to each section and follow the one being read.
 function EpisodePage({ id, back, backLabel, feed }: { id: number; back: () => void; backLabel: string; feed: (id: number) => Feed | undefined }) {
   const { data, error, reload } = useLoad<{ episode: Episode; show: string; kept: Memory[] }>(`/api/podcasts/episodes/${id}`)
   const [problem, setProblem] = useState('')
+  const [current, setCurrent] = useState<Section>('short')
+  const [scrolled, setScrolled] = useState(false)
+  const body = useRef<HTMLDivElement>(null)
   const forget = (m: Memory) =>
     void api(`/api/memories/${m.id}/forget`, { method: 'POST' })
       .then(reload)
@@ -334,10 +373,35 @@ function EpisodePage({ id, back, backLabel, feed }: { id: number; back: () => vo
       .then(back)
       .catch((err: Error) => setProblem(err.message))
   const e = data?.episode
+  const shown = sections.filter(([k]) => k !== 'transcript' || e?.has_transcript)
+  const count: Partial<Record<Section, number>> = { hers: kept('view').length, hosts: kept('heard').length }
+
+  const section = (k: Section) => body.current?.querySelector<HTMLElement>(`[data-section="${k}"]`)
+  const jump = (k: Section) => {
+    const el = section(k)
+    if (!el || !body.current) return
+    body.current.scrollTo({ top: el.offsetTop - 8, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }
+  // The section being read is the last one whose top has passed the top
+  // of the scroll; at the very bottom it is the last one.
+  const onScroll = () => {
+    const el = body.current
+    if (!el) return
+    setScrolled(el.scrollTop > 0)
+    let at: Section = 'short'
+    for (const [k] of shown) {
+      const s = section(k)
+      if (s && s.offsetTop - 40 <= el.scrollTop) at = k
+    }
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 4) at = shown[shown.length - 1][0]
+    setCurrent(at)
+  }
+
   const keptList = (kind: string, hers: boolean) => (
-    <ul className={hers ? 'pod-kept hers' : 'pod-kept'}>
-      {kept(kind).map((m) => (
+    <ol className={hers ? 'pod-kept hers' : 'pod-kept'}>
+      {kept(kind).map((m, i) => (
         <li key={m.id}>
+          {!hers && <span className="num">{String(i + 1).padStart(2, '0')}</span>}
           <span>{m.content}</span>
           <button type="button" className="mem-act" title="Forget" aria-label="Forget" onClick={() => forget(m)}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
@@ -346,17 +410,16 @@ function EpisodePage({ id, back, backLabel, feed }: { id: number; back: () => vo
           </button>
         </li>
       ))}
-    </ul>
+    </ol>
   )
 
   return (
-    <>
-      <button type="button" className="linkish pod-back" onClick={back}>
-        ← {backLabel}
-      </button>
-      <Problem message={error || problem} />
-      {e && (
-        <>
+    <div className="pod-ep">
+      <div className={scrolled ? 'pod-ep-top scrolled' : 'pod-ep-top'}>
+        <button type="button" className="linkish pod-back" onClick={back}>
+          ← {backLabel}
+        </button>
+        {e && (
           <header className="pod-show-head">
             <Art feed={feed(e.feed_id)} size="big" />
             <div>
@@ -367,52 +430,64 @@ function EpisodePage({ id, back, backLabel, feed }: { id: number; back: () => vo
               Have her go over it again
             </button>
           </header>
+        )}
+        {e && (
+          <nav className="pod-jump" aria-label="Sections">
+            {shown.map(([k, label]) => (
+              <button key={k} type="button" aria-current={current === k} onClick={() => jump(k)}>
+                {label}
+                {count[k] !== undefined && <span className="n">{count[k]}</span>}
+              </button>
+            ))}
+          </nav>
+        )}
+      </div>
+      <Problem message={error || problem} />
+      {e && (
+        <div className="pod-ep-body" ref={body} onScroll={onScroll}>
           <div className="pod-episode">
             <div className="pod-col">
-              <section className="pod-section">
+              <section className="pod-section" data-section="short">
                 <h3 className="label">In short</h3>
-                <p>{e.summary}</p>
+                <p className="pod-summary">{e.summary}</p>
               </section>
               {e.share && (
-                <section className="pod-section">
-                  <h3 className="label">She wants to bring up</h3>
-                  <p className="pod-bring">{e.share}</p>
-                </section>
+                <div className="pod-bring">
+                  <span className="label">She wants to bring up</span>
+                  <p>{e.share}</p>
+                </div>
               )}
-              <section className="pod-section">
-                <h3 className="label">What the hosts said</h3>
-                <p className="note">These sit in her memory marked as heard on this show, apart from what you have told her.</p>
-                {kept('heard').length === 0 ? <Empty>She is not holding anything from this episode.</Empty> : keptList('heard', false)}
-              </section>
-              <section className="pod-section">
+              <section className="pod-section" data-section="hers">
                 <h3 className="label">What she thought</h3>
                 <p className="note">Her own views on it. They are hers, not the show's.</p>
                 {kept('view').length === 0 ? <Empty>She did not form a view of her own on this one.</Empty> : keptList('view', true)}
               </section>
-            </div>
-            <div className="pod-col">
-              <section className="pod-section">
-                <h3 className="label">Her notes, part by part</h3>
-                <ul className="pod-parts">
-                  {e.notes.map((n, i) => (
-                    <li key={i}>
-                      <span className="at">{n.at}</span>
-                      <span>{n.text}</span>
-                    </li>
-                  ))}
-                </ul>
+              <section className="pod-section" data-section="hosts">
+                <div className="section-head">
+                  <h3 className="label">What the hosts said</h3>
+                  <span className="sub">{kept('heard').length} kept</span>
+                </div>
+                <p className="note">These sit in her memory marked as heard on this show, apart from what you have told her.</p>
+                {kept('heard').length === 0 ? <Empty>She is not holding anything from this episode.</Empty> : keptList('heard', false)}
               </section>
               {e.has_transcript && (
-                <section className="pod-section">
+                <section className="pod-section" data-section="transcript">
                   <h3 className="label">Transcript</h3>
                   <Transcript id={id} />
                 </section>
               )}
             </div>
+            <aside className="pod-notes">
+              <div className="section-head">
+                <h3 className="label">Her notes, part by part</h3>
+                <span className="sub">tap to open</span>
+              </div>
+              <Parts notes={e.notes} />
+            </aside>
           </div>
-        </>
+        </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -516,7 +591,7 @@ export function Podcasts() {
           </form>
         </nav>
 
-        <div className="pod-main">
+        <div className={view.kind === 'episode' ? 'pod-main episode' : 'pod-main'}>
           <Problem message={error || problem} />
           {data?.missing && <Problem message={`She cannot write episodes out yet: ${data.missing}.`} />}
           {data && !data.enabled && <Problem message="Listening on her own is switched off in Settings." />}
