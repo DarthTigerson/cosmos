@@ -247,6 +247,8 @@ export interface PodcastsView {
   done: Episode[]
   failed: Episode[]
   listened: Record<string, number>
+  // Episodes of each show she has not taken on, by show id.
+  unheard: Record<string, number>
 }
 
 export interface ListItem {

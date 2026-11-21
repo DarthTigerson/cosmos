@@ -80,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/podcasts/episodes/{id}", s.auth(s.episode))
 	mux.HandleFunc("GET /api/podcasts/episodes/{id}/transcript", s.auth(s.episodeTranscript))
 	mux.HandleFunc("POST /api/podcasts/episodes/{id}/listen", s.auth(s.listenToEpisode))
+	mux.HandleFunc("POST /api/podcasts/episodes/{id}/unqueue", s.auth(s.unqueueEpisode))
 	mux.HandleFunc("POST /api/memories/{id}/forget", s.auth(s.forgetMemory))
 	mux.HandleFunc("POST /api/memories/{id}/restore", s.auth(s.restoreMemory))
 	mux.HandleFunc("PUT /api/memories/{id}", s.auth(s.changeMemory))
@@ -111,7 +112,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -717,6 +718,16 @@ func (s *Server) episode(w http.ResponseWriter, r *http.Request) {
 	}
 	feed, _ := s.B.S.GetFeed(e.FeedID)
 	writeJSON(w, 200, map[string]any{"episode": e, "show": feed.Title, "kept": s.B.EpisodeMemories(e)})
+}
+
+// unqueueEpisode takes an episode out of Up next.
+func (s *Server) unqueueEpisode(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.UnqueueEpisode(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) episodeTranscript(w http.ResponseWriter, r *http.Request) {

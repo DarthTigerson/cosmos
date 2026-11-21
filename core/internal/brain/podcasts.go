@@ -399,6 +399,22 @@ func (b *Brain) RemoveFeed(id int64) error {
 
 // QueueEpisode asks her to listen to an episode she had left alone, or
 // to try again one that failed.
+// UnqueueEpisode takes an episode out of the queue before she starts on
+// it. It waits again, as if never asked for.
+func (b *Brain) UnqueueEpisode(id int64) error {
+	e, ok := b.S.GetEpisode(id)
+	if !ok {
+		return errors.New("no such episode")
+	}
+	if e.Status != "queued" {
+		return errors.New("that episode is not waiting in the queue")
+	}
+	e.Status = "waiting"
+	err := b.S.SaveEpisode(e)
+	b.podChanged()
+	return err
+}
+
 func (b *Brain) QueueEpisode(id int64) error {
 	e, ok := b.S.GetEpisode(id)
 	if !ok {
@@ -954,10 +970,11 @@ type PodcastsView struct {
 	Done     []store.Episode `json:"done"`
 	Failed   []store.Episode `json:"failed"`
 	Listened map[int64]int   `json:"listened"` // feed id -> episodes finished
+	Unheard  map[int64]int   `json:"unheard"`  // feed id -> episodes she has not taken on
 }
 
 func (b *Brain) Podcasts() PodcastsView {
-	v := PodcastsView{Enabled: b.PodDir != "" && b.Cfg.Get().Podcasts, Listened: map[int64]int{}}
+	v := PodcastsView{Enabled: b.PodDir != "" && b.Cfg.Get().Podcasts, Listened: map[int64]int{}, Unheard: map[int64]int{}}
 	if b.Transcribe != nil {
 		v.Missing = b.Transcribe.Ready()
 	}
@@ -969,11 +986,16 @@ func (b *Brain) Podcasts() PodcastsView {
 		v.Current = &now[0]
 	}
 	v.Queued, _ = b.S.Episodes(0, 20, "queued")
-	v.Done, _ = b.S.Episodes(0, 30, "done")
+	// Enough for the screen to search and filter what she heard.
+	v.Done, _ = b.S.Episodes(0, 200, "done")
 	v.Failed, _ = b.S.Episodes(0, 10, "failed")
 	all, _ := b.S.Episodes(0, 100000, "done")
 	for _, e := range all {
 		v.Listened[e.FeedID]++
+	}
+	waiting, _ := b.S.Episodes(0, 100000, "waiting")
+	for _, e := range waiting {
+		v.Unheard[e.FeedID]++
 	}
 	return v
 }
