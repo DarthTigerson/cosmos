@@ -202,199 +202,204 @@ function Detail({ id, people, mode, setMode, pick, send, onProblem, onToast }: D
 
   return (
     <article className="person" aria-label={p.name}>
-      <header className="person-head">
-        <Avatar p={p} size="big" />
-        <div>
-          <h2>{p.name}</h2>
-          <span className="muted">
-            {p.relationship || 'relationship not known yet'}
-            {setByYou('relationship')}
-          </span>
-        </div>
-        <div className="actions">
-          <button type="button" className="secondary" aria-pressed={mode === 'edit'} onClick={() => setMode(mode === 'edit' ? null : 'edit')}>
-            Edit
-          </button>
-          <button type="button" className="secondary" aria-pressed={mode === 'merge'} onClick={() => setMode(mode === 'merge' ? null : 'merge')}>
-            Merge
-          </button>
-          <button type="button" className="secondary danger" aria-pressed={mode === 'forget'} onClick={() => setMode(mode === 'forget' ? null : 'forget')}>
-            Forget
-          </button>
-        </div>
-      </header>
+      <div className="person-top">
+        <header className="person-head">
+          <Avatar p={p} size="big" />
+          <div>
+            <h2>{p.name}</h2>
+            <span className="muted">
+              {p.relationship || 'relationship not known yet'}
+              {setByYou('relationship')}
+            </span>
+          </div>
+          <div className="actions">
+            <button type="button" className="secondary" aria-pressed={mode === 'edit'} onClick={() => setMode(mode === 'edit' ? null : 'edit')}>
+              Edit
+            </button>
+            <button type="button" className="secondary" aria-pressed={mode === 'merge'} onClick={() => setMode(mode === 'merge' ? null : 'merge')}>
+              Merge
+            </button>
+            <button type="button" className="secondary danger" aria-pressed={mode === 'forget'} onClick={() => setMode(mode === 'forget' ? null : 'forget')}>
+              Forget
+            </button>
+          </div>
+        </header>
 
-      {mode === 'edit' && <EditForm p={p} onCancel={() => setMode(null)} onSave={(body) => change(body, 'Saved. She will keep what you set.').then(() => setMode(null))} />}
-      {mode === 'merge' && (
-        <div className="person-panel">
-          <h3 className="label">Merge {p.name} into…</h3>
-          <p className="note">
-            {p.name} becomes another name for the person you pick. Notes carry over, and memories and moments that name {p.name} show up under them.
-          </p>
-          <ul className="merge-list">
-            {people
-              .filter((o) => o.id !== p.id)
-              .map((o) => (
-                <li key={o.id}>
-                  <button type="button" onClick={() => void send(`/api/people/${p.id}/merge`, 'POST', { into: o.id }, `${p.name} merged into ${o.name}.`).then(() => pick(o.id)).catch(() => {})}>
-                    <Avatar p={o} />
-                    <span className="person-line">
-                      <span className="person-name">{o.name}</span>
-                      <span className="sub">{o.relationship || 'not sure yet'}</span>
-                    </span>
+        {mode === 'edit' && <EditForm p={p} onCancel={() => setMode(null)} onSave={(body) => change(body, 'Saved. She will keep what you set.').then(() => setMode(null))} />}
+        {mode === 'merge' && (
+          <div className="person-panel">
+            <h3 className="label">Merge {p.name} into…</h3>
+            <p className="note">
+              {p.name} becomes another name for the person you pick. Notes carry over, and memories and moments that name {p.name} show up under them.
+            </p>
+            <ul className="merge-list">
+              {people
+                .filter((o) => o.id !== p.id)
+                .map((o) => (
+                  <li key={o.id}>
+                    <button type="button" onClick={() => void send(`/api/people/${p.id}/merge`, 'POST', { into: o.id }, `${p.name} merged into ${o.name}.`).then(() => pick(o.id)).catch(() => {})}>
+                      <Avatar p={o} />
+                      <span className="person-line">
+                        <span className="person-name">{o.name}</span>
+                        <span className="sub">{o.relationship || 'not sure yet'}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+            <div className="actions">
+              <button type="button" className="secondary" onClick={() => setMode(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {mode === 'forget' && (
+          <div className="person-panel warn">
+            <h3 className="label">Forget {p.name}?</h3>
+            <p className="note">
+              She stops keeping notes on {p.name} and will not add them again when the name comes up. Memories that mention {p.name} stay; forget those on their own if you want.
+            </p>
+            <div className="actions">
+              <button type="button" className="secondary" onClick={() => setMode(null)}>
+                Keep {p.name}
+              </button>
+              <button type="button" className="secondary danger" onClick={() => void send(`/api/people/${p.id}/forget`, 'POST', undefined, `${p.name} forgotten.`).then(() => setMode(null)).catch(() => {})}>
+                Forget {p.name}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <dl className="person-facts">
+          <div>
+            <dt className="label">Closeness</dt>
+            <dd>
+              {closenessWord(p.closeness)}
+              {setByYou('closeness')}
+            </dd>
+          </div>
+          <div>
+            <dt className="label">Also called</dt>
+            <dd>
+              {p.aliases.length > 0 ? p.aliases.join(', ') : <span className="muted">no other names</span>}
+              {setByYou('aliases')}
+            </dd>
+          </div>
+          <div>
+            <dt className="label">Last came up</dt>
+            <dd>{isZero(p.last_mentioned) ? <span className="muted">not recorded</span> : when(p.last_mentioned)}</dd>
+          </div>
+          <div>
+            <dt className="label">Mentions</dt>
+            <dd>{data.mentions} in all</dd>
+          </div>
+        </dl>
+
+        <section>
+          <div className="section-head">
+            <h3 className="label">How often {p.name} comes up</h3>
+            <span className="sub">{recent} in 12 weeks</span>
+          </div>
+          <div className="weeks" role="img" aria-label={`${recent} mentions over the last 12 weeks`}>
+            {data.weeks.map((w, i) => (
+              <i key={i} className={w === 0 ? 'none' : undefined} style={{ height: w === 0 ? '3px' : `${Math.max(8, (w / peak) * 100)}%` }} title={`${w} ${w === 1 ? 'mention' : 'mentions'}, ${11 - i === 0 ? 'this week' : `${11 - i} weeks ago`}`} />
+            ))}
+          </div>
+          <div className="weeks-axis">
+            <span className="sub">12 weeks ago</span>
+            <span className="sub">this week</span>
+          </div>
+        </section>
+
+        {data.connections.length > 0 && (
+          <section>
+            <h3 className="label">Often mentioned with</h3>
+            <div className="person-links">
+              {data.connections.map((c) => (
+                <button key={c.id} type="button" onClick={() => pick(c.id)}>
+                  <Avatar p={c} size="small" />
+                  {c.name}
+                  <span className="sub">{c.relationship || 'not sure yet'}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section>
+          <h3 className="label">What she has noted</h3>
+          {notes.length === 0 ? (
+            <p className="quiet">Nothing noted yet.</p>
+          ) : (
+            <ul className="person-notes">
+              {notes.map((n, i) => (
+                <li key={i}>
+                  <span>{n}</span>
+                  <button type="button" className="mem-act" title="Remove note" aria-label="Remove note" onClick={() => void change({ notes: notes.filter((_, j) => j !== i) }, 'Note removed.').catch(() => {})}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
                   </button>
                 </li>
               ))}
-          </ul>
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => setMode(null)}>
-              Cancel
+            </ul>
+          )}
+          <form className="person-add" onSubmit={addNote}>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={`Add something she should know about ${p.name}`} aria-label="New note" />
+            <button type="submit" className="secondary" disabled={!note.trim()}>
+              Add
             </button>
-          </div>
-        </div>
-      )}
-      {mode === 'forget' && (
-        <div className="person-panel warn">
-          <h3 className="label">Forget {p.name}?</h3>
-          <p className="note">
-            She stops keeping notes on {p.name} and will not add them again when the name comes up. Memories that mention {p.name} stay; forget those on their own if you want.
-          </p>
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => setMode(null)}>
-              Keep {p.name}
-            </button>
-            <button type="button" className="secondary danger" onClick={() => void send(`/api/people/${p.id}/forget`, 'POST', undefined, `${p.name} forgotten.`).then(() => setMode(null)).catch(() => {})}>
-              Forget {p.name}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <dl className="person-facts">
-        <div>
-          <dt className="label">Closeness</dt>
-          <dd>
-            {closenessWord(p.closeness)}
-            {setByYou('closeness')}
-          </dd>
-        </div>
-        <div>
-          <dt className="label">Also called</dt>
-          <dd>
-            {p.aliases.length > 0 ? p.aliases.join(', ') : <span className="muted">no other names</span>}
-            {setByYou('aliases')}
-          </dd>
-        </div>
-        <div>
-          <dt className="label">Last came up</dt>
-          <dd>{isZero(p.last_mentioned) ? <span className="muted">not recorded</span> : when(p.last_mentioned)}</dd>
-        </div>
-        <div>
-          <dt className="label">Mentions</dt>
-          <dd>{data.mentions} in all</dd>
-        </div>
-      </dl>
-
-      <section>
-        <div className="section-head">
-          <h3 className="label">How often {p.name} comes up</h3>
-          <span className="sub">{recent} in 12 weeks</span>
-        </div>
-        <div className="weeks" role="img" aria-label={`${recent} mentions over the last 12 weeks`}>
-          {data.weeks.map((w, i) => (
-            <i key={i} className={w === 0 ? 'none' : undefined} style={{ height: w === 0 ? '3px' : `${Math.max(8, (w / peak) * 100)}%` }} title={`${w} ${w === 1 ? 'mention' : 'mentions'}, ${11 - i === 0 ? 'this week' : `${11 - i} weeks ago`}`} />
-          ))}
-        </div>
-        <div className="weeks-axis">
-          <span className="sub">12 weeks ago</span>
-          <span className="sub">this week</span>
-        </div>
-      </section>
-
-      {data.connections.length > 0 && (
-        <section>
-          <h3 className="label">Often mentioned with</h3>
-          <div className="person-links">
-            {data.connections.map((c) => (
-              <button key={c.id} type="button" onClick={() => pick(c.id)}>
-                <Avatar p={c} size="small" />
-                {c.name}
-                <span className="sub">{c.relationship || 'not sure yet'}</span>
-              </button>
-            ))}
-          </div>
+          </form>
         </section>
-      )}
+      </div>
 
-      <section>
-        <h3 className="label">What she has noted</h3>
-        {notes.length === 0 ? (
-          <p className="quiet">Nothing noted yet.</p>
-        ) : (
-          <ul className="person-notes">
-            {notes.map((n, i) => (
-              <li key={i}>
-                <span>{n}</span>
-                <button type="button" className="mem-act" title="Remove note" aria-label="Remove note" onClick={() => void change({ notes: notes.filter((_, j) => j !== i) }, 'Note removed.').catch(() => {})}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-                    <path d="M4 4l8 8M12 4l-8 8" />
-                  </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <form className="person-add" onSubmit={addNote}>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={`Add something she should know about ${p.name}`} aria-label="New note" />
-          <button type="submit" className="secondary" disabled={!note.trim()}>
-            Add
-          </button>
-        </form>
-      </section>
+      {/* Only memories and moments scroll; everything above stays put. */}
+      <div className="person-scroll">
+        <section>
+          <h3 className="label">Memories that mention {p.name}</h3>
+          {data.memories.length === 0 ? (
+            <p className="quiet">None yet.</p>
+          ) : (
+            <ul className="mem-list">
+              {data.memories.map((m) => (
+                <Row
+                  key={m.id}
+                  m={m}
+                  people={people}
+                  forgotten={false}
+                  onForget={() => memory(`/api/memories/${m.id}/forget`, 'POST', undefined, 'Memory forgotten.')}
+                  onRestore={() => {}}
+                  onPin={(pinned) => memory(`/api/memories/${m.id}`, 'PUT', { pinned }, pinned ? 'Pinned.' : 'Unpinned.')}
+                  onCorrect={(content) => memory(`/api/memories/${m.id}`, 'PUT', { content }, 'Corrected. The old wording is kept.')}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
 
-      <section>
-        <h3 className="label">Memories that mention {p.name}</h3>
-        {data.memories.length === 0 ? (
-          <p className="quiet">None yet.</p>
-        ) : (
-          <ul className="mem-list">
-            {data.memories.map((m) => (
-              <Row
-                key={m.id}
-                m={m}
-                people={people}
-                forgotten={false}
-                onForget={() => memory(`/api/memories/${m.id}/forget`, 'POST', undefined, 'Memory forgotten.')}
-                onRestore={() => {}}
-                onPin={(pinned) => memory(`/api/memories/${m.id}`, 'PUT', { pinned }, pinned ? 'Pinned.' : 'Unpinned.')}
-                onCorrect={(content) => memory(`/api/memories/${m.id}`, 'PUT', { content }, 'Corrected. The old wording is kept.')}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section>
-        <div className="section-head">
-          <h3 className="label">When {p.name} came up</h3>
-          {data.mentions > data.moments.length && <span className="sub">latest {data.moments.length} of {data.mentions}</span>}
-        </div>
-        {data.moments.length === 0 ? (
-          <p className="quiet">No mentions in conversation yet.</p>
-        ) : (
-          <ol className="stream">
-            {data.moments.map((e) => (
-              <li key={e.id}>
-                <span className="time">{when(e.at)}</span>
-                <span>
-                  <span className="muted">{e.kind === 'user_msg' ? data.user : 'Nova'}: </span>
-                  {e.text}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+        <section>
+          <div className="section-head">
+            <h3 className="label">When {p.name} came up</h3>
+            {data.mentions > data.moments.length && <span className="sub">latest {data.moments.length} of {data.mentions}</span>}
+          </div>
+          {data.moments.length === 0 ? (
+            <p className="quiet">No mentions in conversation yet.</p>
+          ) : (
+            <ol className="stream">
+              {data.moments.map((e) => (
+                <li key={e.id}>
+                  <span className="time">{when(e.at)}</span>
+                  <span>
+                    <span className="muted">{e.kind === 'user_msg' ? data.user : 'Nova'}: </span>
+                    {e.text}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      </div>
     </article>
   )
 }
