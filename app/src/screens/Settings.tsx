@@ -10,16 +10,18 @@ const sections = [
   ['day', 'Her day'],
   ['thinks', 'How she thinks'],
   ['may', 'What she may do'],
+  ['ears', 'Her ears'],
   ['voice', 'Her voice'],
 ] as const
 type Section = (typeof sections)[number][0]
 
 // Which settings each section holds, to tell which sections have changed.
 const fields: Record<Exclude<Section, 'voice'>, (keyof Config)[]> = {
-  you: ['user_name', 'companion_name', 'location'],
+  you: ['user_name', 'companion_name', 'platform_name', 'location'],
   day: ['quiet_from', 'quiet_to', 'brief_hour', 'sleep_hour', 'initiative_budget', 'cooldown_minutes'],
   thinks: ['planning', 'verify_with_model', 'verify_claims'],
   may: ['web_search', 'podcasts', 'weather_watch'],
+  ears: ['name_sounds_like', 'listen_window', 'room_minutes', 'hear_language'],
 }
 
 const plans: { value: Config['planning']; title: string; help: string }[] = [
@@ -268,6 +270,9 @@ export function Settings({ onSaved }: { onSaved: () => void }) {
                   <Field id="name" label="Her name">
                     <input id="name" value={cfg.companion_name} onChange={(e) => set({ companion_name: e.target.value })} />
                   </Field>
+                  <Field id="platform" label="Platform name">
+                    <input id="platform" value={cfg.platform_name ?? ''} onChange={(e) => set({ platform_name: e.target.value })} />
+                  </Field>
                   <Field id="location" label="Home">
                     <input id="location" placeholder="City or town" value={cfg.location} onChange={(e) => set({ location: e.target.value })} />
                   </Field>
@@ -356,6 +361,35 @@ export function Settings({ onSaved }: { onSaved: () => void }) {
                   remove={(name) => void connectionAction(() => api('/api/connections', { method: 'PUT', body: (conns.data ?? []).filter((c) => c.name !== name).map((c) => ({ name: c.name, enabled: c.enabled, allow_changes: c.allow_changes })) }))}
                   bringIn={() => void connectionAction(() => api('/api/connections/import', { method: 'POST' }))}
                 />
+              </section>
+
+              <section className="set-section" data-section="ears">
+                <header>
+                  <h2>Her ears</h2>
+                  <p>
+                    Listening for her name, she answers when she hears “{cfg.companion_name}” or anything that sounds like it, and for a while after she replies. What others say nearby is kept for a few minutes, in memory only, so she knows what was going on when you ask her. It is never saved.
+                  </p>
+                </header>
+                <div className="set-grid">
+                  <Field id="sounds-like" label="Also answers to">
+                    <input
+                      id="sounds-like"
+                      placeholder="Other spellings, comma separated"
+                      value={(cfg.name_sounds_like ?? []).join(', ')}
+                      onChange={(e) => set({ name_sounds_like: e.target.value.split(',').map((w) => w.trim()).filter(Boolean) })}
+                    />
+                  </Field>
+                  <Field id="listen-window" label="Seconds she listens on after a reply">
+                    <input id="listen-window" type="number" min={0} max={300} value={cfg.listen_window} onChange={(e) => set({ listen_window: Math.max(0, Number(e.target.value)) })} />
+                  </Field>
+                  <Field id="room-minutes" label="Minutes of nearby talk kept">
+                    <input id="room-minutes" type="number" min={0} max={30} value={cfg.room_minutes} onChange={(e) => set({ room_minutes: Math.max(0, Number(e.target.value)) })} />
+                  </Field>
+                  <Field id="hear-language" label="Language you speak">
+                    <input id="hear-language" placeholder="en" value={cfg.hear_language} onChange={(e) => set({ hear_language: e.target.value.trim() })} />
+                  </Field>
+                </div>
+                <p className="note">Spellings: her name is matched by sound, so close mishearings of “{cfg.companion_name}” already count. Add one here only if she keeps missing it. Set the kept minutes to 0 to keep nothing.</p>
               </section>
 
               <section className="set-section" data-section="voice">

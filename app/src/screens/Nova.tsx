@@ -132,6 +132,12 @@ export function Nova({ state }: { state: State | null }) {
   const { data, error, reload } = useLoad<Today>('/api/today')
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  const busy = useRef(false)
+  // Words said or typed while she was busy. Nothing is dropped: they go
+  // to her together as soon as she is free.
+  const [waiting, setWaiting] = useState<string[]>([])
+  const queued = useRef<string[]>([])
+  const queuedAloud = useRef(false)
   const [sendError, setSendError] = useState('')
   const [live, setLive] = useState<LiveStep[] | null>(null)
   // Her reply as she writes it, before the finished one arrives.
@@ -199,6 +205,7 @@ export function Nova({ state }: { state: State | null }) {
       if ((s.data as StreamEvent).kind === 'initiative') reload()
     }
     if (s.kind === 'writing') setWriting((s.data as { text: string }).text)
+    if (s.kind === 'interrupted') setWriting('')
     if (s.kind === 'message' || (s.kind === 'step' && (s.data as StepSignal).state === 'running')) setWriting('')
     if (s.kind === 'step') {
       const step = s.data as StepSignal
@@ -224,7 +231,7 @@ export function Nova({ state }: { state: State | null }) {
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' })
-  }, [messages.length, sending, writing])
+  }, [messages.length, sending, writing, waiting.length])
 
   async function send(e: FormEvent) {
     e.preventDefault()
@@ -234,23 +241,40 @@ export function Nova({ state }: { state: State | null }) {
     await say(typed)
   }
 
-  // say sends words to her, typed or spoken.
-  async function say(say: string) {
-    if (!say || sending) return
+  // say sends words to her, typed or spoken. While she is busy they
+  // wait, and everything that waited goes as one message.
+  async function say(say: string, spoken = false) {
+    if (!say) return
+    if (busy.current) {
+      queued.current = [...queued.current, say]
+      queuedAloud.current ||= spoken
+      setWaiting(queued.current)
+      return
+    }
+    busy.current = true
     setSending(true)
     setSendError('')
-    try {
-      await api('/api/message', { method: 'POST', body: { text: say } })
-    } catch (err) {
-      setSendError((err as Error).message)
-    } finally {
-      setSending(false)
+    let next = say
+    let aloud = spoken
+    while (next) {
+      try {
+        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud } })
+      } catch (err) {
+        setSendError((err as Error).message)
+      }
       setExtra([])
       reload()
+      next = queued.current.join(' ')
+      aloud = queuedAloud.current
+      queued.current = []
+      queuedAloud.current = false
+      setWaiting([])
     }
+    busy.current = false
+    setSending(false)
   }
 
-  const name = state?.name ?? 'Nova'
+  const name = state?.name ?? 'Companion'
   const current = live?.find((s) => s.running)
   const steps: LiveStep[] = sending && live ? live : (data?.last_run?.steps ?? []).map((s) => ({ ...s, running: false }))
 
@@ -383,6 +407,11 @@ export function Nova({ state }: { state: State | null }) {
               {current ? `${name} is on: ${current.name}` : `${name} is thinking`}
             </p>
           )}
+          {waiting.length > 0 && (
+            <div className="bubble waiting" role="status" title="Goes to her as soon as she is free">
+              {waiting.join(' ')}
+            </div>
+          )}
           <Problem message={sendError || inspectError} />
           <div ref={end} />
         </div>
@@ -402,7 +431,7 @@ export function Nova({ state }: { state: State | null }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
           />
-          <button type="submit" className="primary" disabled={sending || !text.trim()}>
+          <button type="submit" className="primary" disabled={!text.trim()}>
             Send
           </button>
         </form>
@@ -463,7 +492,7 @@ export function Nova({ state }: { state: State | null }) {
             ))}
           </div>
         </div>
-        {state && <Avatar state={state} working={sending} onSay={(words) => void say(words)} view={view} mindCount={data?.intentions.length ?? 0} />}
+        {state && <Avatar state={state} working={sending} onSay={(words, spoken) => void say(words, spoken)} view={view} mindCount={data?.intentions.length ?? 0} />}
         {view === 'only' ? (
           <>
             <button type="button" className="her-details-open" aria-expanded={details} onClick={() => setDetails(!details)}>

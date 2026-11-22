@@ -125,6 +125,9 @@ export class Speaker {
   private source: AudioBufferSourceNode | null = null
   private frame = 0
   private generation = 0
+  // Everything she says passes through this, so she can be made quieter
+  // while it is not yet clear whether someone is talking over her.
+  private level: GainNode | null = null
   onMouth: (m: Mouth) => void = () => {}
   onState: (speaking: boolean) => void = () => {}
   onError: (message: string) => void = () => {}
@@ -133,6 +136,24 @@ export class Speaker {
     this.ctx ??= new AudioContext()
     if (this.ctx.state === 'suspended') void this.ctx.resume()
     return this.ctx
+  }
+
+  private out(): GainNode {
+    const ctx = this.audio()
+    if (!this.level) {
+      this.level = ctx.createGain()
+      this.level.connect(ctx.destination)
+    }
+    return this.level
+  }
+
+  // duck lowers her voice while she might be being cut off, and brings
+  // it back when it was only a noise.
+  duck(on: boolean) {
+    if (!this.ctx) return
+    const g = this.out().gain
+    g.cancelScheduledValues(this.ctx.currentTime)
+    g.setTargetAtTime(on ? 0.25 : 1, this.ctx.currentTime, 0.05)
   }
 
   get speaking(): boolean {
@@ -182,7 +203,7 @@ export class Speaker {
     analyser.fftSize = 1024
     analyser.smoothingTimeConstant = 0.4
     source.connect(analyser)
-    analyser.connect(ctx.destination)
+    analyser.connect(this.out())
     const line = timeline(clip.marks)
     const bins = new Uint8Array(analyser.frequencyBinCount)
     const perBin = ctx.sampleRate / analyser.fftSize
@@ -228,6 +249,10 @@ export class Speaker {
   // stop cuts her off mid-word and drops whatever she was about to say.
   stop() {
     this.generation++
+    if (this.level && this.ctx) {
+      this.level.gain.cancelScheduledValues(this.ctx.currentTime)
+      this.level.gain.value = 1
+    }
     this.queue = []
     cancelAnimationFrame(this.frame)
     try {

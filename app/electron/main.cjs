@@ -73,7 +73,7 @@ function spawnCore(port) {
     const now = Date.now()
     restarts = restarts.filter((t) => now - t < 60000)
     if (restarts.length >= 5) {
-      dialog.showErrorBox('Nova stopped', `The core keeps exiting (code ${code}).\n\n${lastLines}`)
+      dialog.showErrorBox('The core stopped', `The core keeps exiting (code ${code}).\n\n${lastLines}`)
       app.quit()
       return
     }
@@ -239,7 +239,7 @@ app.whenReady().then(async () => {
 })
 
 // Closing the window closes the app, and the app takes the core with it.
-// To keep Nova awake with the window shut, run cosmos-core on its own and
+// To keep her awake with the window shut, run cosmos-core on its own and
 // point the app at it with COSMOS_CORE_URL.
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {

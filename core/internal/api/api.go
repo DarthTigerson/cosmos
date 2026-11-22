@@ -8,12 +8,14 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +36,9 @@ type Server struct {
 	// Voice is her speaking voice. Nil, or not set up, falls back to the
 	// computer's built-in one.
 	Voice *voice.Manager
+	// Hearing writes out what the user says. Nil uses whisper-cli, which
+	// loads the model for every clip.
+	Hearing *voice.Hearing
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -55,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/state", s.auth(s.state))
 	mux.HandleFunc("GET /api/today", s.auth(s.today))
 	mux.HandleFunc("POST /api/message", s.auth(s.message))
+	mux.HandleFunc("POST /api/interrupt", s.auth(s.interrupt))
 	mux.HandleFunc("GET /api/sessions", s.auth(s.sessions))
 	mux.HandleFunc("POST /api/sessions", s.auth(s.newSession))
 	mux.HandleFunc("GET /api/sessions/{id}", s.auth(s.session))
@@ -86,6 +92,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/memories/{id}", s.auth(s.changeMemory))
 	mux.HandleFunc("POST /api/speech", s.auth(s.speech))
 	mux.HandleFunc("POST /api/hear", s.auth(s.hear))
+	mux.HandleFunc("POST /api/hear/ready", s.auth(s.hearReady))
+	mux.HandleFunc("POST /api/overheard", s.auth(s.overheard))
+	mux.HandleFunc("DELETE /api/overheard", s.auth(s.forgetOverheard))
 	mux.HandleFunc("GET /api/voices", s.auth(s.voices))
 	mux.HandleFunc("PUT /api/voices", s.auth(s.setVoice))
 	mux.HandleFunc("POST /api/messages/{id}/feedback", s.auth(s.feedback))
@@ -146,7 +155,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.B.State())
 }
 
-// today is the Nova screen: the current session and its thread.
+// today is the conversation screen: the current session and its thread.
 func (s *Server) today(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"state": s.B.State(), "messages": []store.Event{}}
 	open, _ := s.B.S.OpenSessions()
@@ -173,7 +182,7 @@ func (s *Server) today(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// sessions lists what she has not slept on yet, for the list under Nova.
+// sessions lists what she has not slept on yet, for the list under her name.
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	open, err := s.B.S.OpenSessions()
 	if err != nil {
@@ -238,6 +247,8 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Text string `json:"text"`
+		// Spoken: said aloud rather than typed.
+		Spoken bool `json:"spoken"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
 		fail(w, 400, "send {\"text\": \"...\"}")
@@ -245,12 +256,26 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	}
 	// The turn finishes even if the window closes mid-reply, so her
 	// stream never holds a question without its answer.
-	reply, err := s.B.HandleMessage(context.WithoutCancel(r.Context()), in.Text)
+	ctx := context.WithoutCancel(r.Context())
+	if in.Spoken {
+		ctx = brain.WithSaid(ctx, brain.Said{Aloud: true, Room: s.B.Room()})
+	}
+	reply, err := s.B.HandleMessage(ctx, in.Text)
+	if errors.Is(err, brain.ErrInterrupted) {
+		writeJSON(w, 200, map[string]any{"interrupted": true, "run": reply.Run})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "run": reply.Run})
 		return
 	}
 	writeJSON(w, 200, reply)
+}
+
+// interrupt stops the reply she is working on: the user has started
+// talking over her.
+func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]bool{"stopped": s.B.Interrupt()})
 }
 
 func (s *Server) mind(w http.ResponseWriter, r *http.Request) {
@@ -795,28 +820,112 @@ func (s *Server) setVoice(w http.ResponseWriter, r *http.Request) {
 // hear takes a short recording from the microphone and returns the
 // words in it. Nothing leaves this computer.
 func (s *Server) hear(w http.ResponseWriter, r *http.Request) {
+	// Two minutes of speech at most.
+	wav, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if err != nil || len(wav) < 1000 {
+		fail(w, 400, "the recording was empty or too long")
+		return
+	}
+	cfg := s.B.Cfg.Get()
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	if s.Hearing != nil && s.Hearing.Missing(cfg.HearModel) == "" {
+		text, err := s.Hearing.Hear(ctx, wav, cfg.HearModel, cfg.HearLanguage, hearingPrompt(cfg))
+		if err == nil {
+			view := heardView(cfg, text)
+			// Primed with her name, Whisper sometimes leaves it out when it
+			// opens what was said, taking it for the prompt. Heard again
+			// unprimed, her name is caught; only talk not for her pays for
+			// the second listen.
+			if !view["addressed"].(bool) {
+				if plain, err := s.Hearing.Hear(ctx, wav, cfg.HearModel, cfg.HearLanguage, ""); err == nil && voice.Addressed(plain, cfg.CompanionName, cfg.NameSoundsLike) {
+					view["addressed"] = true
+				}
+			}
+			writeJSON(w, 200, view)
+			return
+		}
+		s.B.Log.Printf("hear: %v; trying whisper-cli", err)
+	}
 	tmp, err := os.CreateTemp("", "cosmos-heard-*.wav")
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
 	defer os.Remove(tmp.Name())
-	// Two minutes of speech at most.
-	n, err := io.Copy(tmp, http.MaxBytesReader(w, r.Body, 8<<20))
+	tmp.Write(wav)
 	tmp.Close()
-	if err != nil || n < 1000 {
-		fail(w, 400, "the recording was empty or too long")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
 	text, err := (&brain.WhisperCLI{}).Hear(ctx, tmp.Name())
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]string{"text": text})
+	writeJSON(w, 200, heardView(cfg, text))
 }
+
+// heardView is the words heard, whether her name is in them, and
+// whether they close the conversation.
+func heardView(cfg config.Config, text string) map[string]any {
+	return map[string]any{
+		"text":      text,
+		"addressed": voice.Addressed(text, cfg.CompanionName, cfg.NameSoundsLike),
+		"ending":    voice.Ending(text),
+		"window":    cfg.ListenWindow,
+	}
+}
+
+// overheard keeps something said nearby that was not meant for her, in
+// memory only, for her next reply.
+func (s *Server) overheard(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Text string `json:"text"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in) != nil {
+		fail(w, 400, "send {\"text\": \"...\"}")
+		return
+	}
+	s.B.Overhear(in.Text)
+	writeJSON(w, 200, map[string]bool{"kept": true})
+}
+
+func (s *Server) forgetOverheard(w http.ResponseWriter, r *http.Request) {
+	s.B.ForgetRoom()
+	writeJSON(w, 200, map[string]bool{"forgotten": true})
+}
+
+// hearingPrompt is the line Whisper is primed with: who is talking to
+// whom, and where. Written as a sentence, since a bare list of names is
+// left out of what follows it.
+func hearingPrompt(cfg config.Config) string {
+	p := cfg.UserName + " is talking with " + cfg.CompanionName + " at home"
+	if cfg.Location != "" {
+		p += " in " + cfg.Location
+	}
+	return p + "."
+}
+
+// hearReady gets her ears and her voice ready when listening starts, so
+// the first exchange is as quick as the rest.
+func (s *Server) hearReady(w http.ResponseWriter, r *http.Request) {
+	cfg := s.B.Cfg.Get()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		if s.Hearing != nil {
+			if err := s.Hearing.Ready(ctx, cfg.HearModel, cfg.HearLanguage); err != nil {
+				s.B.Log.Printf("hear ready: %v", err)
+			}
+		}
+		if s.Voice != nil && s.Voice.Missing() == "" {
+			if err := s.Voice.Ready(ctx); err != nil {
+				s.B.Log.Printf("voice ready: %v", err)
+			}
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
+}
+
+var webAddress = regexp.MustCompile(`(?i)\bhttps?://\S+|\bwww\.\S+`)
 
 // speech turns text into sound with the computer's own voice and sends
 // the sound back. The app plays it, and moves her mouth to it.
@@ -830,8 +939,10 @@ func (s *Server) speech(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "unreadable: "+err.Error())
 		return
 	}
-	// Marks that are for the eye, not the ear.
-	text := strings.NewReplacer("*", "", "_", " ", "`", "", "#", "", "\n", " ").Replace(in.Text)
+	// Marks that are for the eye, not the ear. An address is not read
+	// out letter by letter; the chat has it.
+	text := webAddress.ReplaceAllString(in.Text, "the link")
+	text = strings.NewReplacer("*", "", "_", " ", "`", "", "#", "", "\n", " ").Replace(text)
 	text = strings.TrimSpace(text)
 	if text == "" {
 		fail(w, 400, "nothing to say")

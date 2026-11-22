@@ -104,10 +104,19 @@ func (m *Manager) alive(ctx context.Context) bool {
 	return res.StatusCode == http.StatusOK
 }
 
-// ensure makes sure the helper is running, starting it if need be.
+// Ready starts the helper ahead of time, so the first sentence she
+// says does not wait for the model to load.
+func (m *Manager) Ready(ctx context.Context) error { return m.ensure(ctx) }
+
+// ensure makes sure the helper is running, starting it if need be. A
+// helper already started is taken to be running; if it has died, the
+// request to it fails and speak starts it again.
 func (m *Manager) ensure(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.cmd != nil && m.port != 0 {
+		return nil
+	}
 	if m.alive(ctx) {
 		return nil
 	}
@@ -139,14 +148,24 @@ func (m *Manager) ensure(ctx context.Context) error {
 	var problems bytes.Buffer
 	cmd.Stderr = &problems
 	if err := cmd.Start(); err != nil {
+		m.port = 0
 		return fmt.Errorf("the voice helper would not start: %w", err)
 	}
 	m.cmd = cmd
 	exited := make(chan struct{})
 	go func() { cmd.Wait(); close(exited) }()
+	// Until it answers, it is not taken to be running.
+	ok := false
+	defer func() {
+		if !ok {
+			cmd.Process.Kill()
+			m.cmd, m.port = nil, 0
+		}
+	}()
 	deadline := time.Now().Add(40 * time.Second)
 	for time.Now().Before(deadline) {
 		if m.alive(ctx) {
+			ok = true
 			return nil
 		}
 		select {
@@ -200,6 +219,28 @@ func (m *Manager) Speak(ctx context.Context, text, voice string, speed float64) 
 }
 
 func (m *Manager) speak(ctx context.Context, text, voice string, speed float64) ([]byte, error) {
+	data, err := m.speakOnce(ctx, text, voice, speed)
+	if errors.Is(err, errGone) {
+		// The helper had stopped. Start it again and try once more.
+		m.forget()
+		data, err = m.speakOnce(ctx, text, voice, speed)
+	}
+	return data, err
+}
+
+var errGone = errors.New("the voice helper is not answering")
+
+// forget drops a helper that has stopped answering.
+func (m *Manager) forget() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cmd != nil && m.cmd.Process != nil {
+		m.cmd.Process.Kill()
+	}
+	m.cmd, m.port = nil, 0
+}
+
+func (m *Manager) speakOnce(ctx context.Context, text, voice string, speed float64) ([]byte, error) {
 	if err := m.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -210,13 +251,19 @@ func (m *Manager) speak(ctx context.Context, text, voice string, speed float64) 
 		speed = 1
 	}
 	body, _ := json.Marshal(map[string]any{"text": text, "voice": voice, "speed": speed})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.url(), bytes.NewReader(body))
+	m.mu.Lock()
+	url := m.url()
+	m.mu.Unlock()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("the voice helper is not answering: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("%w: %v", errGone, err)
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 64<<20))

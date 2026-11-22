@@ -6,7 +6,7 @@ import { DEFAULT_SIZE, textSize, useTextSize } from './textSize'
 import type { CalendarItem, ModelsView, State, StreamEvent, TierName } from './types'
 
 // The strip along the bottom of the window, after the one in vIDE: how
-// the core and Nova are on the left; the text size, the notification bell
+// the core and the companion are on the left; the text size, the notification bell
 // and the clock on the right. Everything that opens from it rises from its
 // top edge like a tab.
 
@@ -43,7 +43,7 @@ function openSession(id: number | undefined) {
 // useFooterNotes works out the notes that hold right now, and turns the
 // core's signals into blips.
 function useFooterNotes(state: State | null, down: boolean, screen: string): Note[] {
-  const name = state?.name ?? 'Nova'
+  const name = state?.name ?? 'Companion'
   const models = useLoad<ModelsView>('/api/models')
   const [unread, setUnread] = useState<StreamEvent[]>([])
   const onNova = screen === 'nova'

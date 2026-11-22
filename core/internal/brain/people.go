@@ -73,6 +73,7 @@ type PersonView struct {
 	Weeks       []int          `json:"weeks"`    // mentions per week, oldest first, the last is this week
 	Connections []Connection   `json:"connections"`
 	User        string         `json:"user"`
+	Companion   string         `json:"companion"`
 }
 
 var errNoPerson = errors.New("no such person")
@@ -113,7 +114,7 @@ func (b *Brain) Person(id int64) (PersonView, error) {
 		return PersonView{}, err
 	}
 	names := PersonNames(p)
-	view := PersonView{Person: p, Memories: []store.Memory{}, Weeks: make([]int, 12), Connections: []Connection{}, User: b.Cfg.Get().UserName}
+	view := PersonView{Person: p, Memories: []store.Memory{}, Weeks: make([]int, 12), Connections: []Connection{}, User: b.Cfg.Get().UserName, Companion: b.Cfg.Get().CompanionName}
 	all, _ := b.S.Memories()
 	for _, m := range all {
 		if (m.Kind == "fact" || m.Kind == "reflection") && Mentions(m.Content, names) {

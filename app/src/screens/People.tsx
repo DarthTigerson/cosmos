@@ -391,7 +391,7 @@ function Detail({ id, people, mode, setMode, pick, send, onProblem, onToast }: D
                 <li key={e.id}>
                   <span className="time">{when(e.at)}</span>
                   <span>
-                    <span className="muted">{e.kind === 'user_msg' ? data.user : 'Nova'}: </span>
+                    <span className="muted">{e.kind === 'user_msg' ? data.user : data.companion}: </span>
                     {e.text}
                   </span>
                 </li>

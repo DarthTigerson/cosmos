@@ -1,4 +1,4 @@
-// cosmos-core is Nova's mind as a single local process. The Electron app
+// cosmos-core is the companion's mind as a single local process. The Electron app
 // starts it and talks to it over HTTP; it also runs on its own.
 package main
 
@@ -121,7 +121,9 @@ func main() {
 	home, _ := os.UserHomeDir()
 	speaker := &voice.Manager{Dir: filepath.Join(*data, "voice"), ModelDir: filepath.Join(home, "models", "kokoro")}
 	defer speaker.Stop()
-	srv := &http.Server{Handler: (&api.Server{B: b, Token: token, Launch: launch, ModelDirs: modelDirs, Voice: speaker}).Handler()}
+	hearing := &voice.Hearing{}
+	defer hearing.Stop()
+	srv := &http.Server{Handler: (&api.Server{B: b, Token: token, Launch: launch, ModelDirs: modelDirs, Voice: speaker, Hearing: hearing}).Handler()}
 	fmt.Printf("listening on http://%s\n", ln.Addr())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

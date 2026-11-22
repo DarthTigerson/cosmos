@@ -29,8 +29,12 @@ type Endpoint struct {
 }
 
 type Config struct {
+	// Names are settings, never written into code or prompts: who the
+	// user is, what the companion is called, and what the platform she
+	// runs on is called.
 	UserName      string `json:"user_name"`
 	CompanionName string `json:"companion_name"`
+	PlatformName  string `json:"platform_name"`
 	Location      string `json:"location"`
 
 	// Main is her voice: it writes replies and checks them against tool
@@ -68,14 +72,30 @@ type Config struct {
 	// Voice is the name of the system voice she speaks with. Empty
 	// means the computer's own default.
 	Voice string `json:"voice"`
+	// HearModel is the Whisper model for what the user says aloud; empty
+	// means the first in ~/models/whisper. HearLanguage is the language
+	// they speak, which is quicker and surer than guessing it each time.
+	HearModel    string `json:"hear_model"`
+	HearLanguage string `json:"hear_language"`
+	// When always listening she answers only to her name, or to
+	// anything that sounds like it. NameSoundsLike adds spellings the
+	// recogniser makes of it that are not caught on their own.
+	NameSoundsLike []string `json:"name_sounds_like"`
+	// ListenWindow is how many seconds after her reply she still takes
+	// what is said as meant for her, without her name.
+	ListenWindow int `json:"listen_window"`
+	// RoomMinutes is how long what she overhears is kept, in memory
+	// only, for the reply she is next asked for. 0 keeps nothing.
+	RoomMinutes int `json:"room_minutes"`
 	// MCPServers are the user's own tool servers she may use.
 	MCPServers []mcp.Server `json:"mcp_servers"`
 }
 
 func Default() Config {
 	return Config{
-		UserName:      "Thomas",
-		CompanionName: "Nova",
+		UserName:      "Friend",
+		CompanionName: "Companion",
+		PlatformName:  "Cosmos",
 		Main:          Endpoint{BaseURL: "http://127.0.0.1:8080/v1", Model: "main"},
 		Planning:      "auto",
 		// Off by default: in practice the model rejected correct replies
@@ -91,6 +111,9 @@ func Default() Config {
 		WeatherWatch:     true,
 		WebSearch:        true,
 		Podcasts:         true,
+		HearLanguage:     "en",
+		ListenWindow:     25,
+		RoomMinutes:      3,
 	}
 }
 

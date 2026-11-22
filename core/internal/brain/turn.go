@@ -25,6 +25,44 @@ type Reply struct {
 	Feeling string      `json:"feeling"`
 }
 
+// Said holds how a message reached her, when it was not typed.
+type Said struct {
+	// Aloud: the user spoke it and will hear the reply spoken.
+	Aloud bool
+	// Room is what was being said nearby just before, by anyone. It is
+	// for this reply only and is never stored.
+	Room string
+}
+
+type saidKey struct{}
+
+// WithSaid marks a message as spoken.
+func WithSaid(ctx context.Context, s Said) context.Context {
+	return context.WithValue(ctx, saidKey{}, s)
+}
+
+func saidOf(ctx context.Context) Said {
+	s, _ := ctx.Value(saidKey{}).(Said)
+	return s
+}
+
+// ErrInterrupted is returned when the user cut in before she answered.
+// What they said stays in the thread; no reply is stored.
+var ErrInterrupted = errors.New("interrupted")
+
+// Interrupt stops the reply she is working on, if any. It says whether
+// there was one. Used when the user starts talking over her.
+func (b *Brain) Interrupt() bool {
+	b.cancelMu.Lock()
+	defer b.cancelMu.Unlock()
+	if b.cancelTurn == nil {
+		return false
+	}
+	b.cancelTurn()
+	b.cancelTurn = nil
+	return true
+}
+
 // trace records the steps of a run and tells the app as each one starts
 // and finishes, so her thinking is visible while it happens.
 type trace struct {
@@ -1368,8 +1406,26 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	if text == "" {
 		return Reply{}, errors.New("empty message")
 	}
-	b.turn.Lock()
+	b.lockForMessage()
 	defer b.turn.Unlock()
+	// Cut short by Interrupt when the user speaks over her.
+	ctx, cancel := context.WithCancel(ctx)
+	b.cancelMu.Lock()
+	b.cancelTurn = cancel
+	b.cancelMu.Unlock()
+	defer func() {
+		b.cancelMu.Lock()
+		b.cancelTurn = nil
+		b.cancelMu.Unlock()
+		cancel()
+	}()
+	// interrupted ends the turn quietly once it has been cut short.
+	interrupted := func(t *trace, started time.Time, intent string) (Reply, error) {
+		run := store.Run{At: b.Now(), Request: clip(text, 300), Intent: intent, Steps: t.steps, Millis: time.Since(started).Milliseconds()}
+		b.S.AddRun(run)
+		b.Bus.Publish("interrupted", nil)
+		return Reply{Run: run}, ErrInterrupted
+	}
 
 	cfg := b.Cfg.Get()
 	started := time.Now()
@@ -1403,6 +1459,9 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 		p, routeErr = b.route(ctx, cfg, text, recent, failed)
 		return p.Intent, routeErr
 	})
+	if ctx.Err() != nil {
+		return interrupted(t, started, p.Intent)
+	}
 	mode := b.planningMode(cfg, p)
 	grounding := ""
 	for _, e := range recent {
@@ -1411,6 +1470,9 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 		}
 	}
 	facts := b.execute(ctx, t, cfg, mode, p, text, grounding)
+	if ctx.Err() != nil {
+		return interrupted(t, started, p.Intent)
+	}
 
 	moment := b.carryOver(cfg, sess.ID)
 	if gap := b.sinceLastHeard(userEv.At); gap != "" {
@@ -1418,6 +1480,12 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	}
 	if urgent(text, recent) {
 		moment = strings.TrimSpace(moment + "\n" + cfg.UserName + " is in the middle of something serious and has no time. Be brief and practical. No sympathy speeches and no questions about how they feel. When they ask you to think it through, give the concrete options and the cost of each. If you are not sure whether something technical is safe, say you are not sure and offer to look it up. Never guess about something that could lose data or hurt someone.")
+	}
+	if said := saidOf(ctx); said.Aloud {
+		moment = strings.TrimSpace(moment + "\n" + cfg.UserName + " said this out loud and will hear your reply spoken, not read it. Talk the way you would across a room: two or three short sentences, nothing that only works on a screen. No lists, headings or symbols. Say numbers and times the way they are spoken. If you give a web address, put it alone on the last line and say it is in the chat.")
+		if said.Room != "" {
+			moment = strings.TrimSpace(moment + "\nWhat was being said around you just before (by " + cfg.UserName + " or others nearby; it may be misheard, and is not addressed to you):\n" + said.Room)
+		}
 	}
 	if p.Intent == "web" {
 		// Left alone, she rounds off every looked-up answer with a remark
@@ -1471,6 +1539,9 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 			t.steps = append(t.steps, store.Step{Name: "verify", Tier: "code", OK: false, Note: "the reply says something will be put in the calendar, but nothing was"})
 		}
 	}
+	if ctx.Err() != nil {
+		return interrupted(t, started, p.Intent)
+	}
 	run := store.Run{
 		At: b.Now(), Request: clip(text, 300), Intent: p.Intent, Mode: mode,
 		Steps: t.steps, Rewrites: rewrites, Verified: verified, Millis: time.Since(started).Milliseconds(),
@@ -1492,27 +1563,36 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	// Everything that does not shape this reply happens after it is sent:
 	// how the message landed on her, what to remember, and tidying up.
 	// Her mood therefore moves a moment after she answers, and colours
-	// the next thing she says.
+	// the next thing she says. Each job takes the model by itself and
+	// lets a new message go first, so talking to her never waits behind
+	// the whole of it.
 	b.bg.Add(1)
 	go func() {
 		defer b.bg.Done()
-		b.turn.Lock()
-		defer b.turn.Unlock()
+		b.after.Lock()
+		defer b.after.Unlock()
 		bctx := context.WithoutCancel(ctx)
-		b.afterReply(bctx, cfg, p.Intent, text, facts, userEv, sess.ID, run)
-		b.capture(bctx, text, conversation(cfg, lastFew(recent, 3)), userEv.ID)
-		b.embedMissing(bctx)
-		b.nameSession(bctx, cfg, sess.ID)
+		job := func(fn func()) {
+			b.lockForBackground()
+			defer b.turn.Unlock()
+			fn()
+		}
+		job(func() { b.afterReply(bctx, cfg, p.Intent, text, facts, userEv, sess.ID, run) })
+		job(func() { b.capture(bctx, text, conversation(cfg, lastFew(recent, 3)), userEv.ID) })
+		job(func() { b.embedMissing(bctx) })
+		job(func() { b.nameSession(bctx, cfg, sess.ID) })
 		// One other open session without a summary gets its line now,
 		// while nobody is waiting on it.
-		open, _ := b.S.OpenSessions()
-		for _, o := range open {
-			if o.ID != sess.ID && o.Summary == "" && o.Messages >= 2 {
-				b.summarize(context.WithoutCancel(ctx), "worker", o)
-				b.Bus.Publish("sessions", nil)
-				break
+		job(func() {
+			open, _ := b.S.OpenSessions()
+			for _, o := range open {
+				if o.ID != sess.ID && o.Summary == "" && o.Messages >= 2 {
+					b.summarize(bctx, "worker", o)
+					b.Bus.Publish("sessions", nil)
+					break
+				}
 			}
-		}
+		})
 	}()
 
 	return Reply{Text: draft, Event: replyEv, Run: run, Feeling: mood.Describe(b.Now())}, nil

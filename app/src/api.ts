@@ -69,8 +69,19 @@ export async function apiAudio(path: string, body: unknown): Promise<ArrayBuffer
   return res.arrayBuffer()
 }
 
+// What the core heard in a recording: the words, whether her name (or
+// something that sounds like it) is in them, whether they close the
+// conversation, and how long after her reply she still listens without
+// her name.
+export interface Heard {
+  text: string
+  addressed: boolean
+  ending: boolean
+  window: number
+}
+
 // apiHear sends a recording to the core and gets back the words in it.
-export async function apiHear(wav: ArrayBuffer): Promise<string> {
+export async function apiHear(wav: ArrayBuffer): Promise<Heard> {
   const c = await conn()
   let res: Response
   try {
@@ -80,7 +91,7 @@ export async function apiHear(wav: ArrayBuffer): Promise<string> {
   }
   const data = await res.json().catch(() => null)
   if (!res.ok) throw new Error(data?.error ?? `The core answered ${res.status}.`)
-  return (data?.text as string) ?? ''
+  return { text: data?.text ?? '', addressed: !!data?.addressed, ending: !!data?.ending, window: data?.window ?? 25 }
 }
 
 // useAsset gives an address an <img> can load from the core. An image

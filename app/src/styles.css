@@ -1,4 +1,4 @@
-/* Cosmos. A dark ink-blue ground; warm amber is Nova herself, cool blue
+/* Cosmos. A dark ink-blue ground; warm amber is the companion herself, cool blue
    is the machinery around her. One look, on purpose: no light theme. */
 :root {
   color-scheme: dark;
@@ -109,7 +109,7 @@ input, select { min-height: 44px; width: 100%; background: var(--panel); border:
 input::placeholder { color: var(--dim); }
 input[type='checkbox'] { width: 18px; min-height: 18px; height: 18px; padding: 0; accent-color: var(--nova); }
 
-/* ---------- Nova: the conversation ---------- */
+/* ---------- The conversation ---------- */
 .split { flex: 1; min-width: 0; display: flex; }
 .chat { overflow: hidden; padding: 30px 40px 28px; gap: 20px; }
 /* The conversation uses the full width between the nav and her panel. */
@@ -141,6 +141,7 @@ input[type='checkbox'] { width: 18px; min-height: 18px; height: 18px; padding: 0
 .args { font: 400 11px/1.5 var(--mono); color: var(--dim); overflow-wrap: anywhere; }
 .fresh { font-size: 13px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 14px; max-width: 70ch; }
 .bubble { align-self: flex-end; max-width: 70%; background: var(--raised); border-radius: 14px 14px 4px 14px; padding: 11px 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.bubble.waiting { opacity: 0.55; border: 1px dashed var(--line-strong); }
 .reply { display: flex; flex-direction: column; gap: 6px; max-width: 80%; }
 .weblink { display: inline-flex; align-items: stretch; vertical-align: -4px; max-width: 100%; border: 1px solid #2a4a5e; border-radius: 999px; background: #122431; overflow: hidden; white-space: nowrap; }
 .weblink a { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 1px 8px 1px 9px; color: #a9d3ee; text-decoration: none; font: 400 13px/1.5 var(--mono); }

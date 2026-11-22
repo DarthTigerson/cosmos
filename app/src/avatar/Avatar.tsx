@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { apiHear, useSignals } from '../api'
+import { api, apiHear, useSignals } from '../api'
 import type { State, StepSignal, StreamEvent } from '../types'
 import { type Ears, openEars } from './ears'
 import type { Watching } from './sight'
@@ -13,6 +13,18 @@ function wordsOf(line: string): string[] {
 }
 
 type Ear = 'off' | 'listening' | 'hearing' | 'writing'
+
+// A sentence with a number or an address in it is not said until the
+// reply is finished: those are what her checks look at, and a rewrite
+// can change them.
+const risky = /\d|https?:\/\/|www\./i
+
+// How many lines two drafts start with in common.
+function shared(a: string[], b: string[]): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return i
+}
 
 // Things a speech recogniser writes when it is handed a noise.
 const notSpeech = ['you', 'thank you.', 'thanks for watching!', 'thank you for watching.', 'bye.', '.', 'okay.']
@@ -45,7 +57,7 @@ const keep = (key: string, value: string) => {
 //   - see: the camera. She decides for herself what to do with it.
 // Voice and listening go on whichever way she is shown; the camera needs
 // her figure, so it goes off with it.
-export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string) => void; view: HerView; mindCount: number }) {
+export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string, spoken: boolean) => void; view: HerView; mindCount: number }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<Stage | null>(null)
   const speaker = useRef<Speaker | null>(null)
@@ -57,6 +69,42 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   const [voice, setVoice] = useState(() => kept('cosmos:her-voice') === 'on')
   const [ear, setEar] = useState<Ear>('off')
   const listening = ear !== 'off'
+  // How she listens: to everything said, or only when her name is said
+  // (and for a short while after she answers, without it). The second
+  // keeps her out of conversations that are not with her.
+  const [byName, setByName] = useState(() => kept('cosmos:her-listen') !== 'all')
+  const named = useRef(byName)
+  named.current = byName
+  // Until when what is said is taken as meant for her without her name:
+  // held open while she works on a reply, then open a little longer.
+  const [talking, setTalking] = useState(false)
+  const openUntil = useRef(0)
+  const windowFor = useRef(25)
+  // Set when you said goodbye: the window shuts after this reply.
+  const closing = useRef(false)
+  const inWindow = () => Date.now() < openUntil.current
+  const holdOpen = () => {
+    openUntil.current = Infinity
+    setTalking(true)
+  }
+  // Her reply is over: the window runs from now, or shuts.
+  const letRun = () => {
+    if (openUntil.current !== Infinity) return
+    if (closing.current) {
+      closing.current = false
+      openUntil.current = 0
+      setTalking(false)
+      return
+    }
+    openUntil.current = Date.now() + windowFor.current * 1000
+  }
+  useEffect(() => {
+    if (!talking) return
+    const id = window.setInterval(() => {
+      if (!inWindow()) setTalking(false)
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [talking])
   const [seeing, setSeeing] = useState(false)
   const [watching, setWatching] = useState<Watching>('pointer')
   // Whether the small picture of what she sees is shown; right-click the
@@ -71,6 +119,14 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   const sight = useRef<{ stop: () => void } | null>(null)
   const aloud = useRef(voice)
   aloud.current = voice
+  const busy = useRef(working)
+  busy.current = working
+  // Set when you cut in: the rest of the reply she was giving is not
+  // said. The next reply she starts lifts it.
+  const hushed = useRef(false)
+  // Set when the reply is redone after she started saying it: the rest
+  // waits for the finished reply, which is compared with what was said.
+  const settling = useRef(false)
   const say = useRef(onSay)
   say.current = onSay
   // What of the reply being written has already been said aloud.
@@ -99,6 +155,7 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     sp.onState = (on) => {
       setSpeaking(on)
       ears.current?.setHerSpeaking(on)
+      if (!on && !busy.current) letRun()
     }
     sp.onError = setProblem
     speaker.current = sp
@@ -203,20 +260,44 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     stage.current?.setFace({ look, manner, energy })
   })
 
-  // With her voice on she speaks as she writes. Each sentence is said as soon as
-  // the next one has begun; the last waits for the finished reply, since
-  // the end of a draft is the part most likely to change.
+  // Her reply is in (or was cut off). Unless she is about to say it, the
+  // window starts to run.
+  useSignals((s) => {
+    if (s.kind === 'message' && (s.data as StreamEvent).kind === 'user_msg') return
+    if (s.kind !== 'message' && s.kind !== 'interrupted') return
+    window.setTimeout(() => {
+      // Still busy: more she was told is being answered next.
+      if (!speaker.current?.speaking && !busy.current) letRun()
+    }, 500)
+  })
+
+  // With her voice on she speaks as she writes. Each sentence is said as
+  // soon as the next one has begun; the last waits for the finished
+  // reply, since the end of a draft is the part most likely to change.
   useSignals((s) => {
     if (!aloud.current) return
     const sp = speaker.current!
     if (s.kind === 'step') {
       const step = s.data as StepSignal
-      if (step.name === 'route' && step.state === 'running') said.current = []
+      if (step.state !== 'running') return
+      if (step.name === 'route') {
+        said.current = []
+        hushed.current = false
+        settling.current = false
+      }
+      // A second draft: whatever of the first was still to come is
+      // dropped, and she waits for the finished reply.
+      if ((step.name === 'rewrite' || step.name === 'writer') && said.current.length > 0) {
+        sp.stop()
+        settling.current = true
+      }
       return
     }
     if (s.kind === 'writing') {
+      if (hushed.current || settling.current) return
       const done = sentences((s.data as { text: string }).text).slice(0, -1)
       for (let i = said.current.length; i < done.length; i++) {
+        if (risky.test(done[i])) break
         said.current.push(done[i])
         noteHers(done[i])
         sp.say(done[i])
@@ -226,13 +307,24 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     if (s.kind !== 'message') return
     const m = s.data as StreamEvent
     if (m.kind !== 'nova_msg' && m.kind !== 'initiative') return
-    const final = sentences(m.text)
     const already = said.current
     said.current = []
-    // What she said while writing should be how the reply begins. If the
-    // reply was redone after she started, she does not say it twice.
-    const same = already.every((line, i) => final[i] === line)
-    const rest = same ? final.slice(already.length) : already.length === 0 ? final : []
+    settling.current = false
+    // The reply you cut off: it is in the chat, and not said.
+    if (hushed.current) {
+      hushed.current = false
+      return
+    }
+    const final = sentences(m.text)
+    // What she said while writing should be how the reply begins. Where
+    // the finished reply parts from it, she picks up from there, so the
+    // corrected part is heard and nothing is said twice.
+    const from = shared(already, final)
+    const rest = final.slice(from)
+    if (from < already.length && rest.length > 0) {
+      sp.stop()
+      sp.say('Sorry, let me put that better.')
+    }
     for (const line of rest) {
       noteHers(line)
       sp.say(line)
@@ -243,19 +335,65 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
     setProblem('')
     try {
       ears.current = await openEars({
-        // You began to speak: she stops at once, as a person would.
+        // Something began: she goes quieter until it is clear it is you.
         start: () => {
-          speaker.current?.stop()
+          speaker.current?.duck(true)
           setEar('hearing')
+        },
+        // It is you: she stops, as a person would, and leaves the rest
+        // of that reply unsaid. Listening for her name, she stops at once
+        // only for someone she is talking with; anyone else she waits on
+        // until it is clear they are talking to her.
+        confirmed: () => {
+          if (named.current && !inWindow()) return
+          if (speaker.current?.speaking) {
+            speaker.current.stop()
+            hushed.current = true
+          }
+        },
+        dropped: () => {
+          speaker.current?.duck(false)
+          setEar((cur) => (cur === 'off' ? 'off' : 'listening'))
         },
         heard: (wav) => {
           setEar('writing')
           apiHear(wav)
-            .then((text) => {
-              const words = text.trim()
-              if (words.length > 1 && !notSpeech.includes(words.toLowerCase()) && !isHers(words)) say.current(words)
+            .then((heard) => {
+              const words = heard.text.trim()
+              windowFor.current = heard.window
+              const real = words.length > 1 && !notSpeech.includes(words.toLowerCase()) && !isHers(words)
+              // Not for her: kept for a few minutes as what is going on
+              // around her, in memory only, and she carries on.
+              if (real && named.current && !heard.addressed && !inWindow()) {
+                speaker.current?.duck(false)
+                void api('/api/overheard', { method: 'POST', body: { text: words } }).catch(() => {})
+                return
+              }
+              if (real) {
+                holdOpen()
+                closing.current = heard.ending
+                // Said while she was still working on a reply: that reply
+                // is dropped and she answers both together.
+                if (busy.current) {
+                  hushed.current = true
+                  speaker.current?.stop()
+                  void api('/api/interrupt', { method: 'POST' }).catch(() => {})
+                } else if (speaker.current?.speaking) {
+                  // Too short to stop her while it was said ("wait!"), but
+                  // real words: she stops now.
+                  hushed.current = true
+                  speaker.current.stop()
+                }
+                speaker.current?.duck(false)
+                say.current(words, true)
+              } else {
+                speaker.current?.duck(false)
+              }
             })
-            .catch((e: Error) => setProblem(`She could not make that out: ${e.message}`))
+            .catch((e: Error) => {
+              speaker.current?.duck(false)
+              setProblem(`She could not make that out: ${e.message}`)
+            })
             .finally(() => setEar((cur) => (cur === 'off' ? 'off' : 'listening')))
         },
       })
@@ -264,12 +402,25 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
       return
     }
     setEar('listening')
+    // Her ears and voice load now, not on the first thing said.
+    void api('/api/hear/ready', { method: 'POST' }).catch(() => {})
   }
 
   function stopListening() {
     setEar('off')
     ears.current?.stop()
     ears.current = null
+    openUntil.current = 0
+    closing.current = false
+    setTalking(false)
+    // What she overheard goes with her ears.
+    void api('/api/overheard', { method: 'DELETE' }).catch(() => {})
+  }
+
+  function toggleByName() {
+    const next = !byName
+    setByName(next)
+    keep('cosmos:her-listen', next ? 'name' : 'all')
   }
 
   function toggleVoice() {
@@ -295,7 +446,11 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
             : watching === 'motion'
               ? 'watching'
               : listening
-                ? 'listening'
+                ? !byName
+                  ? 'listening'
+                  : talking
+                    ? 'with you'
+                    : `listening for ${state?.name ?? 'her name'}`
                 : 'here'
   const lit = word === 'talking' || word === 'hearing you' || word === 'thinking'
   const status = (
@@ -395,7 +550,16 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
         </p>
       )}
       {view !== 'only' && actions}
-      {listening && view !== 'only' && <p className="quiet">Just talk. She answers when you pause, and stops if you speak over her.</p>}
+      {listening && view !== 'only' && (
+        <p className="quiet">
+          {byName
+            ? `She answers when you say “${state?.name ?? 'her name'}”, and for a little while after without it. Other talk nearby is left alone. `
+            : 'Just talk. She answers when you pause, and stops if you speak over her. '}
+          <button type="button" className="text" onClick={toggleByName}>
+            {byName ? 'Answer everything' : 'Only when named'}
+          </button>
+        </p>
+      )}
     </div>
   )
 }

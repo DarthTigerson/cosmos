@@ -42,6 +42,8 @@ func newRig(t *testing.T) *rig {
 	cfg, _ := config.Load("")
 	c := cfg.Get()
 	c.Location = "Lisbon"
+	// The tests were written with these names; nothing else assumes them.
+	c.UserName, c.CompanionName = "Thomas", "Nova"
 	cfg.Set(c)
 	r := &rig{now: time.Date(2026, 11, 20, 9, 0, 0, 0, time.Local)}
 	r.fake = &llm.Fake{Handlers: map[string]func(llm.Request) (string, error){
@@ -768,7 +770,7 @@ func TestUnsupportedNumbers(t *testing.T) {
 }
 
 func TestGate(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	day := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
 	night := time.Date(2026, 11, 20, 23, 30, 0, 0, time.UTC)
 	if why := gate(cfg, day, "followup", time.Time{}, 0); why != "" {
@@ -927,7 +929,7 @@ func TestDraftThatCopiesThePromptIsRejected(t *testing.T) {
 }
 
 func TestHistoryAlternatesAndStartsWithTheUser(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	msgs := history(cfg, []store.Event{
 		{Kind: "initiative", Text: "Did you call the dentist?"},
 		{Kind: "user_msg", Text: "Not yet."},
@@ -1677,14 +1679,14 @@ func TestAnotherWordForTheSameRelationIsNotInvented(t *testing.T) {
 }
 
 func TestBracketedAsidesAreCut(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	if got := cleanDraft(cfg, "Night night, Thomas. [Goodbye for now.]"); got != "Night night, Thomas." {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestNotesAfterAReplyAreCut(t *testing.T) {
-	got := cleanDraft(config.Default(), "See you later.\n\nNOTES TO SELF (Thomas cannot see them):\nHe is leaving.")
+	got := cleanDraft(testConfig(), "See you later.\n\nNOTES TO SELF (Thomas cannot see them):\nHe is leaving.")
 	if got != "See you later." {
 		t.Errorf("got %q", got)
 	}
@@ -1948,7 +1950,7 @@ func TestSheNoticesALongGap(t *testing.T) {
 }
 
 func TestSurenessAndFeedback(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	if l, b := sureness(cfg, []Fact{{Tool: "web.search", Result: 1}}, true); l != "fairly" || b != "looked it up online" {
 		t.Errorf("web: %q %q", l, b)
 	}
@@ -2124,5 +2126,83 @@ func TestPersonViewCountsMentionsAndConnections(t *testing.T) {
 	}
 	if len(view.Connections) != 1 || view.Connections[0].Name != "Bethany" {
 		t.Fatalf("Bethany is named alongside Link: %+v", view.Connections)
+	}
+}
+
+func TestTalkingOverHerStopsTheReply(t *testing.T) {
+	r := newRig(t)
+	r.fake.Handlers["writer"] = func(llm.Request) (string, error) {
+		// The user cuts in while she is still writing.
+		if !r.b.Interrupt() {
+			t.Error("there was a reply to stop")
+		}
+		return "Let me tell you all about it.", nil
+	}
+	_, err := r.say("Tell me about Lisbon")
+	if !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("err = %v, want ErrInterrupted", err)
+	}
+	msgs, _ := r.b.S.SessionEvents(r.b.sessionFor(r.now, "user").ID, 0, "user_msg", "nova_msg")
+	if len(msgs) != 1 || msgs[0].Kind != "user_msg" {
+		t.Fatalf("thread = %+v, want only what the user said", msgs)
+	}
+	if r.b.Interrupt() {
+		t.Error("nothing should be left to stop between turns")
+	}
+	r.fake.Handlers["writer"] = func(llm.Request) (string, error) { return "Sounds good.", nil }
+	if reply, err := r.say("Actually, tell me about Porto"); err != nil || reply.Text == "" {
+		t.Fatalf("the next message was not answered: %v", err)
+	}
+}
+
+// testConfig is the default configuration with the names the tests use.
+func testConfig() config.Config {
+	c := config.Default()
+	c.UserName, c.CompanionName = "Thomas", "Nova"
+	return c
+}
+
+func TestWhatSheOverhearsIsNeverKept(t *testing.T) {
+	r := newRig(t)
+	secret := "the surprise party is on Saturday at Mark's"
+	r.b.Overhear(secret)
+	var notes string
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		notes = q.Messages[len(q.Messages)-1].Content
+		return "Sounds good.", nil
+	}
+	ctx := WithSaid(context.Background(), Said{Aloud: true, Room: r.b.Room()})
+	if _, err := r.b.HandleMessage(ctx, "what do you think of that?"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	if !strings.Contains(notes, secret) {
+		t.Errorf("the reply should be able to see what was just said nearby:\n%s", notes)
+	}
+	if r.b.Room() != "" {
+		t.Error("what was overheard is shown to one reply only")
+	}
+	evs, _ := r.b.S.EventsBetween(r.now.Add(-24*time.Hour), r.now.Add(24*time.Hour))
+	for _, e := range evs {
+		if strings.Contains(e.Text, "surprise party") {
+			t.Errorf("overheard words were stored in a %s event", e.Kind)
+		}
+	}
+	mems, _ := r.b.S.Memories()
+	for _, m := range mems {
+		if strings.Contains(m.Content, "surprise party") {
+			t.Errorf("overheard words became a memory: %q", m.Content)
+		}
+	}
+}
+
+func TestNothingIsOverheardWhenTheRoomIsOff(t *testing.T) {
+	r := newRig(t)
+	c := r.b.Cfg.Get()
+	c.RoomMinutes = 0
+	r.b.Cfg.Set(c)
+	r.b.Overhear("anything at all")
+	if r.b.Room() != "" {
+		t.Error("with the room off nothing is kept")
 	}
 }

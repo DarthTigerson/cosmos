@@ -41,6 +41,9 @@ func (b *Brain) shouldSleep(cfg config.Config, now time.Time) bool {
 
 // Sleep runs a sleep now, whatever the hour.
 func (b *Brain) Sleep(ctx context.Context) (SleepReport, error) {
+	// The day's last reply is filed before she sleeps on it.
+	b.after.Lock()
+	defer b.after.Unlock()
 	b.turn.Lock()
 	defer b.turn.Unlock()
 	return b.sleepLocked(ctx)

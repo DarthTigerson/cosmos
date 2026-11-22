@@ -73,7 +73,9 @@ func (b *Brain) Tick(ctx context.Context) {
 	b.gatherReminders(now)
 	b.queueBrief(cfg, now)
 	b.watchWeather(ctx, cfg, now)
-	if b.shouldSleep(cfg, now) {
+	// Not while the last reply is still being filed: the next beat sleeps.
+	if b.shouldSleep(cfg, now) && b.after.TryLock() {
+		defer b.after.Unlock()
 		if _, err := b.sleepLocked(ctx); err != nil {
 			b.Log.Printf("sleep: %v", err)
 		}

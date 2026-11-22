@@ -91,7 +91,7 @@ export function App() {
   }
 
   // The first tab carries her name: the other tabs are parts of her.
-  const name = state?.name ?? 'Nova'
+  const name = state?.name ?? 'Companion'
   const labels: Record<ScreenName, string> = {
     nova: name, mind: 'Mind', memory: 'Memory', people: 'People', calendar: 'Calendar', lists: 'Lists', podcasts: 'Podcasts', sleep: 'Sleep', models: 'Models', settings: 'Settings',
   }

@@ -17,8 +17,12 @@ const BLOCK = 2048 // about an eighth of a second
 const blockSeconds = BLOCK / RATE
 
 export async function openEars(on: {
-  // You started speaking.
+  // Something loud began: maybe you, maybe a cough.
   start: () => void
+  // It has gone on long enough to be someone speaking.
+  confirmed?: () => void
+  // It was too short to be speech, and is dropped.
+  dropped?: () => void
   // You finished: here is what you said, as a WAV file.
   heard: (wav: ArrayBuffer) => void
   // Loudness of the room, 0 to 1, for showing that she hears something.
@@ -48,6 +52,10 @@ export async function openEars(on: {
   let speaking = false
   let loudRun = 0
   let silentRun = 0
+  // How much of what is being kept was loud, and whether that has
+  // already been enough to count as speech.
+  let loudKept = 0
+  let sure = false
   let kept: Float32Array[] = []
   // A little from before the first loud block, so first syllables are kept.
   const before: Float32Array[] = []
@@ -57,9 +65,14 @@ export async function openEars(on: {
     kept = []
     speaking = false
     silentRun = 0
+    loudKept = 0
+    sure = false
     const spoken = blocks.length * blockSeconds
     // A cough or a door is not a sentence.
-    if (spoken < 0.45) return
+    if (spoken < 0.45) {
+      on.dropped?.()
+      return
+    }
     let total = 0
     for (const b of blocks) total += b.length
     const all = new Float32Array(total)
@@ -87,6 +100,9 @@ export async function openEars(on: {
       if (speaking) {
         kept = []
         speaking = false
+        loudKept = 0
+        sure = false
+        on.dropped?.()
       }
       return
     }
@@ -113,6 +129,7 @@ export async function openEars(on: {
         silentRun = 0
         kept = [...before]
         before.length = 0
+        loudKept = loudRun
         loudRun = 0
         on.start()
       }
@@ -120,6 +137,12 @@ export async function openEars(on: {
     }
     kept.push(block)
     silentRun = loud ? 0 : silentRun + 1
+    if (loud) loudKept++
+    // Half a second of sound is a voice, not a knock.
+    if (!sure && loudKept * blockSeconds >= 0.5) {
+      sure = true
+      on.confirmed?.()
+    }
     // Seven tenths of a second of quiet ends what you were saying; half
     // a minute is the most she takes in one go.
     if (silentRun * blockSeconds >= 0.7 || kept.length * blockSeconds > 30) finish()

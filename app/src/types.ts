@@ -208,6 +208,7 @@ export interface PersonDetail {
   weeks: number[]
   connections: Connection[]
   user: string
+  companion: string
 }
 
 export interface Feed {
@@ -290,6 +291,12 @@ export interface Endpoint {
 export interface Config {
   user_name: string
   companion_name: string
+  platform_name: string
+  hear_model: string
+  hear_language: string
+  name_sounds_like: string[] | null
+  listen_window: number
+  room_minutes: number
   location: string
   main: Endpoint
   worker: Endpoint
@@ -332,7 +339,7 @@ export interface ModelsView {
 }
 
 export interface Signal {
-  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing' | 'memories' | 'people'
+  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing' | 'memories' | 'people' | 'interrupted'
   data: unknown
 }
 

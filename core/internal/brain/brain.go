@@ -1,4 +1,4 @@
-// Package brain is Nova's mind: the awake loop that answers messages, the
+// Package brain is the companion's mind: the awake loop that answers messages, the
 // mood and values she appraises events with, the intentions she carries,
 // and the sleep that turns a day into reflections.
 package brain
@@ -48,6 +48,39 @@ type Brain struct {
 	// One model job at a time: every model shares the same GPU.
 	turn sync.Mutex
 	bg   sync.WaitGroup
+	// Messages waiting for the model. Work done after a reply steps
+	// aside for them, so the next thing said is answered first.
+	wanted atomic.Int32
+	// Work after a reply runs one batch at a time, in order.
+	after sync.Mutex
+	// Stops the reply being worked on; nil between turns.
+	cancelMu   sync.Mutex
+	cancelTurn context.CancelFunc
+	// What was overheard while listening for her name; memory only.
+	room room
+}
+
+// lockForMessage takes the model for a message, ahead of background work.
+func (b *Brain) lockForMessage() {
+	b.wanted.Add(1)
+	b.turn.Lock()
+	b.wanted.Add(-1)
+}
+
+// lockForBackground takes the model for one background job, once no
+// message is waiting for it. Each job lets go when it is done, so a
+// message waits for one job at most, never the whole batch.
+func (b *Brain) lockForBackground() {
+	for {
+		for b.wanted.Load() > 0 {
+			time.Sleep(20 * time.Millisecond)
+		}
+		b.turn.Lock()
+		if b.wanted.Load() == 0 {
+			return
+		}
+		b.turn.Unlock()
+	}
 }
 
 func New(s *store.Store, l llm.Client, cfg *config.Holder) *Brain {

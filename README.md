@@ -46,15 +46,37 @@ COSMOS_CORE_URL=http://127.0.0.1:7717 COSMOS_TOKEN=choose-a-secret npm start
 
 1. **route** (main model): picks the tools needed and a planning mode.
 2. **tools** (code): weather, calendar, memory and people lookups.
-3. **notice** (main model): how the moment lands on her, judged against her
-   values and the people close to you. This moves her mood and may queue a
-   follow-up.
-4. **writer** (main model): writes the reply in her voice from the facts.
-5. **verify**: code checks every number against the facts; the main model
+3. **writer** (main model): writes the reply in her voice from the facts.
+4. **verify**: code checks every number against the facts; the main model
    checks replies that used tools. A failed check earns one rewrite.
 
 Everything is written to her memory stream as it happens. After the reply,
-a capture step keeps her long-term facts about you up to date.
+in the background: **notice** (worker) judges how the moment landed on her
+against her values and the people close to you, which moves her mood and
+may queue a follow-up; a capture step keeps her long-term facts about you
+up to date. Each background job takes the model on its own and lets a new
+message go first.
+
+**Names.** Her name, your name and the platform's name are settings
+(`companion_name`, `user_name`, `platform_name`), never written into code
+or prompts.
+
+**Talking to her.** The microphone button opens her ears. By default she
+listens for her name: she answers when she hears it, or anything that
+sounds like it ("Also answers to" in Settings adds spellings), and for a
+short while after each reply without it. Talk not meant for her is kept
+for a few minutes in memory only, so a reply she is asked for knows what
+was just said; it is never written to her stream, memories or sleep.
+"Answer everything" turns the name gate off.
+
+Speech is written out by `whisper-server` (from `brew install
+whisper-cpp`), kept running while she listens and stopped after 15 idle
+minutes; the model is the first `.bin` in `~/models/whisper` unless
+`hear_model` names one. Her voice is Kokoro, started when listening
+starts. Cutting in stops her only once it is clearly someone speaking
+(and, listening for her name, someone she is talking with); words said
+while she is working are never dropped, and cut her current reply short
+so she answers everything together.
 
 **Sessions.** A session is one sitting. Her memories, people, mood and
 intentions carry across all of them; only the thread starts clean. A new
