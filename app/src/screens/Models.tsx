@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, useLoad } from '../api'
+import { api, copyText, useLoad } from '../api'
 import { Problem, Screen } from '../parts'
 import type { Config, Endpoint, MemoryUsage, ModelsView, TierName, TierView } from '../types'
 
@@ -385,7 +385,7 @@ function Log({ text }: { text: string }) {
   const box = useRef<HTMLPreElement>(null)
   async function copy() {
     try {
-      await navigator.clipboard.writeText(text)
+      await copyText(text)
       setCopied('Copied')
     } catch {
       // The clipboard was refused: select the text so Cmd+C copies it.

@@ -1,6 +1,6 @@
 // The Electron shell. It owns the window and nothing else: Nova's mind is
 // the cosmos-core process, which this file starts and stops.
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, systemPreferences } = require('electron')
+const { app, BrowserWindow, Menu, clipboard, ipcMain, dialog, shell, session, systemPreferences } = require('electron')
 const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
@@ -230,6 +230,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('cosmos:memory', () => system.memory())
   ipcMain.handle('cosmos:memory-breakdown', () => system.breakdown(app.getAppMetrics().map((p) => p.pid)))
   ipcMain.handle('cosmos:battery', () => system.battery())
+  // Copying goes through here: the page is refused the browser's own
+  // clipboard permission along with everything else. Text only, and
+  // only ever written, never read.
+  ipcMain.handle('cosmos:copy', (_e, text) => {
+    if (typeof text === 'string' && text.length <= 1_000_000) clipboard.writeText(text)
+  })
   setMenu()
   const win = createWindow()
   if (process.env.COSMOS_SCREENSHOT_DIR) screenshots(win, process.env.COSMOS_SCREENSHOT_DIR)

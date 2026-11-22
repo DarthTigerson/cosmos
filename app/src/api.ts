@@ -13,6 +13,7 @@ declare global {
       memory(): Promise<MemoryUsage>
       memoryBreakdown(): Promise<MemoryBreakdown>
       battery(): Promise<BatteryStatus | null>
+      copy?(text: string): Promise<void>
       setZoom(factor: number): void
       onTextSize(handler: (dir: 'larger' | 'smaller' | 'reset') => void): () => void
       onToggleNav?(handler: () => void): () => void
@@ -21,6 +22,14 @@ declare global {
 }
 
 let connPromise: Promise<Conn> | null = null
+
+// copyText puts text on the clipboard: through the app in Electron, where
+// the page itself may not touch the clipboard, or the browser's own way
+// in a plain browser.
+export async function copyText(text: string): Promise<void> {
+  if (window.cosmos?.copy) return window.cosmos.copy(text)
+  await navigator.clipboard.writeText(text)
+}
 
 // In Electron the preload script says where the core is. In a plain
 // browser (handy while developing) it comes from ?core=…&token=….

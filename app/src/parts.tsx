@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react'
+import { copyText } from './api'
 import type { Mood } from './types'
 
 // The mark: a body with an orbit. The second orbit and the moon appear in
@@ -93,11 +94,11 @@ function WebLink({ url }: { url: string }) {
   const feed = /rss|feed|atom|\.xml\b/i.test(url)
   async function copy() {
     try {
-      await navigator.clipboard.writeText(url)
+      await copyText(url)
       setCopied(true)
       setTimeout(() => setCopied(false), 1600)
     } catch {
-      // Nothing to fall back to: the address is still in the chip's tooltip.
+      // Not copied; the address is still in the chip's tooltip.
     }
   }
   return (
