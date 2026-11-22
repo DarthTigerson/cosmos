@@ -37,7 +37,7 @@ type StepCall struct {
 	Items []string        `json:"items,omitempty"`
 }
 
-var toolNames = []string{"weather.now", "memory.search", "people.find", "calendar.list", "calendar.find", "calendar.add", "calendar.remove", "web.search", "web.read", "lists.add", "lists.show", "lists.done", "lists.remove", "podcasts.heard", "podcasts.listen", "podcasts.find"}
+var toolNames = []string{"weather.now", "memory.search", "people.find", "calendar.list", "calendar.find", "calendar.add", "calendar.remove", "web.search", "web.read", "lists.add", "lists.show", "lists.done", "lists.remove", "podcasts.heard", "podcasts.listen", "podcasts.find", "books.read"}
 
 const toolHelp = `- weather.now: the weather now, today and tomorrow for a place, compared with her own log of recent days. Args: place (leave empty for the home location).
 - memory.search: look up what she remembers. Args: query.
@@ -50,6 +50,7 @@ const toolHelp = `- weather.now: the weather now, today and tomorrow for a place
 - web.read: read one page or feed, when the short results are not enough. Each link on the page is shown with its address in brackets, and any RSS feeds it offers are listed under feeds; a later step can read one of those. Args: url (copied exactly from a result, a page or the user, never made up).
 - podcasts.heard: what she remembers from episodes she has already listened to, on the shows she follows. Not for finding a show. Args: query (the topic; leave empty to see what she listened to lately).
 - podcasts.find: search for a podcast show online by its name and get its RSS feed address, from Apple's podcast directory. Use it whenever they ask to search for, look up or find a podcast, want its feed, or want to follow it. Args: query (the show's name only, without "podcast").
+- books.read: what she took from the books she has read, which the user gave her, with the book's own words where they match. Args: query (the topic or words to find; leave empty to see what she read lately).
 - podcasts.listen: queue an older episode of a show she follows, when they ask her to listen to it. Args: query (words from the episode's title, or its date).
 - lists.add: put things on one of their lists. Args: list ("shopping", "to-do", or any name they use), items (each thing as its own short entry, in their words).
 - lists.show: read a list. Args: list (leave empty for all lists).
@@ -184,6 +185,9 @@ func (b *Brain) runTool(ctx context.Context, c StepCall) (any, error) {
 
 	case "podcasts.listen":
 		return b.listenToOlder(c.Query)
+
+	case "books.read":
+		return b.searchBooks(c.Query)
 
 	case "lists.show":
 		return b.listShow(c)

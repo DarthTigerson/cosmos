@@ -39,7 +39,11 @@ type Brain struct {
 	PodHTTP    *http.Client
 	Transcribe Transcriber
 	podBusy    atomic.Bool
-	Log        *log.Logger
+	// BookDir is where the books she is given are kept. Empty switches
+	// books off.
+	BookDir  string
+	bookBusy atomic.Bool
+	Log      *log.Logger
 	// Rest loads the models for her state and stops the others, so the
 	// sleeper and the waking models are never in memory together. Nil
 	// leaves the models alone.

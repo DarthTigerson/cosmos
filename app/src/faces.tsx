@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { api, useAsset, useLoad } from './api'
 import { when } from './format'
 import type { Face, Person, UnknownGroup } from './types'
@@ -7,9 +7,20 @@ import type { Face, Person, UnknownGroup } from './types'
 // and a row of someone's pictures. The pictures stay on this computer;
 // the core serves them to this app only.
 
+// A click opens the picture full size; a click anywhere or Escape closes it.
 export function FacePicture({ id, size = 72, alt }: { id: number; size?: number; alt: string }) {
   const url = useAsset(`/api/images/${id}`)
-  return <span className="face-pic" style={{ width: size, height: size }}>{url && <img src={url} alt={alt} width={size} height={size} />}</span>
+  const big = useRef<HTMLDialogElement>(null)
+  return (
+    <>
+      <button type="button" className="face-pic" style={{ width: size, height: size }} aria-label={`Enlarge: ${alt}`} disabled={!url} onClick={() => big.current?.showModal()}>
+        {url && <img src={url} alt={alt} width={size} height={size} />}
+      </button>
+      <dialog ref={big} className="face-big" onClick={() => big.current?.close()}>
+        {url && <img src={url} alt={alt} />}
+      </dialog>
+    </>
+  )
 }
 
 // One-tap answers for someone new.

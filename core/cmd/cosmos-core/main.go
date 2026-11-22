@@ -84,6 +84,7 @@ func main() {
 	b.Rest = launch.Rest
 	b.E = client
 	b.PodDir = filepath.Join(*data, "podcasts")
+	b.BookDir = filepath.Join(*data, "books")
 	b.MCP = mcp.NewManager()
 	// Her connections start beside everything else: a slow or broken
 	// server must not hold up waking.

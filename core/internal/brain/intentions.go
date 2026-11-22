@@ -57,6 +57,7 @@ func gate(cfg config.Config, now time.Time, kind string, lastInitiative time.Tim
 func (b *Brain) Tick(ctx context.Context) {
 	// Listening goes on beside everything else and never waits here.
 	b.podcastTick(ctx)
+	b.bookTick(ctx)
 	go b.embedMissing(context.WithoutCancel(ctx))
 	if !b.turn.TryLock() {
 		return
@@ -226,6 +227,9 @@ func reachOutTitle(i store.Intention) string {
 	case "podcast":
 		show, _, _ := strings.Cut(strings.TrimPrefix(i.Reason, "heard on "), ":")
 		return clip("From "+show, 42)
+	case "book":
+		title, _, _ := strings.Cut(strings.TrimPrefix(i.Reason, "read "), " by ")
+		return clip("From "+title, 42)
 	case "brief":
 		return "Morning note"
 	case "weather":
@@ -250,6 +254,8 @@ func (b *Brain) instructionFor(cfg config.Config, i store.Intention) (string, st
 		return i.Text + " Write a short weather update for " + cfg.UserName + ": what it is doing now and what is coming in the next hours. One or two sentences.", facts
 	case "podcast":
 		return "You have just finished listening to a podcast episode (" + i.Reason + "). You wanted to bring this up with " + cfg.UserName + ": \"" + i.Text + "\". Say it in your own words in one or two sentences, and say which show you heard it on. The people talking were the show's hosts. You and " + cfg.UserName + " have not talked about this episode: never say \"what we talked about\" or \"as we discussed\". If it reminds you of something " + cfg.UserName + " is doing, say it made you think of that.", facts
+	case "book":
+		return "You have just finished reading a book (" + strings.TrimPrefix(i.Reason, "read ") + ") that " + cfg.UserName + " gave you. You wanted to bring this up with them: \"" + i.Text + "\". Say it in your own words in one or two sentences, and say which book it is from. You read it on your own and have not discussed it with them: never say \"what we talked about\" or \"as we discussed\".", facts
 	case "face":
 		return "You saw someone through your camera and you are not sure who they are. Your message is shown with the picture of them. Ask " + cfg.UserName + " this, in your own words and briefly, without describing the picture: \"" + i.Text + "\"", facts
 	case "reflection":

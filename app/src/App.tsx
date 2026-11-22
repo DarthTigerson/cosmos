@@ -7,6 +7,7 @@ import { TitleBar } from './TitleBar'
 import { Problem } from './parts'
 import { Calendar } from './screens/Calendar'
 import { Lists } from './screens/Lists'
+import { Books } from './screens/Books'
 import { Podcasts } from './screens/Podcasts'
 import { Memory } from './screens/Memory'
 import { Mind } from './screens/Mind'
@@ -17,7 +18,7 @@ import { Settings } from './screens/Settings'
 import { Sleep } from './screens/Sleep'
 import type { SessionsView, State } from './types'
 
-const screens = ['nova', 'mind', 'memory', 'people', 'calendar', 'lists', 'podcasts', 'sleep', 'models', 'settings'] as const
+const screens = ['nova', 'mind', 'memory', 'people', 'calendar', 'lists', 'podcasts', 'books', 'sleep', 'models', 'settings'] as const
 type ScreenName = (typeof screens)[number]
 
 // Whether the side nav is folded to its icons, kept between launches.
@@ -93,7 +94,7 @@ export function App() {
   // The first tab carries her name: the other tabs are parts of her.
   const name = state?.name ?? 'Companion'
   const labels: Record<ScreenName, string> = {
-    nova: name, mind: 'Mind', memory: 'Memory', people: 'People', calendar: 'Calendar', lists: 'Lists', podcasts: 'Podcasts', sleep: 'Sleep', models: 'Models', settings: 'Settings',
+    nova: name, mind: 'Mind', memory: 'Memory', people: 'People', calendar: 'Calendar', lists: 'Lists', podcasts: 'Podcasts', books: 'Books', sleep: 'Sleep', models: 'Models', settings: 'Settings',
   }
   const asleep = state?.state === 'asleep'
   const list = sessions.data?.open ?? []
@@ -160,6 +161,7 @@ export function App() {
         {screen === 'calendar' && <Calendar />}
         {screen === 'lists' && <Lists />}
         {screen === 'podcasts' && <Podcasts />}
+        {screen === 'books' && <Books />}
         {screen === 'sleep' && <Sleep />}
         {screen === 'models' && <Models asleep={state?.state === 'asleep'} />}
         {screen === 'settings' && <Settings onSaved={reload} />}

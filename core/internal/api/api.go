@@ -93,6 +93,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/podcasts/episodes/{id}/transcript", s.auth(s.episodeTranscript))
 	mux.HandleFunc("POST /api/podcasts/episodes/{id}/listen", s.auth(s.listenToEpisode))
 	mux.HandleFunc("POST /api/podcasts/episodes/{id}/unqueue", s.auth(s.unqueueEpisode))
+	mux.HandleFunc("GET /api/books", s.auth(s.books))
+	mux.HandleFunc("POST /api/books", s.auth(s.addBook))
+	mux.HandleFunc("GET /api/books/{id}", s.auth(s.book))
+	mux.HandleFunc("DELETE /api/books/{id}", s.auth(s.removeBook))
+	mux.HandleFunc("GET /api/books/{id}/cover", s.auth(s.bookCover))
+	mux.HandleFunc("GET /api/books/{id}/search", s.auth(s.searchBook))
+	mux.HandleFunc("POST /api/books/{id}/read", s.auth(s.readBook))
+	mux.HandleFunc("POST /api/books/{id}/unqueue", s.auth(s.unqueueBook))
+	mux.HandleFunc("POST /api/books/{id}/kind", s.auth(s.bookKind))
 	mux.HandleFunc("POST /api/memories/{id}/forget", s.auth(s.forgetMemory))
 	mux.HandleFunc("POST /api/memories/{id}/restore", s.auth(s.restoreMemory))
 	mux.HandleFunc("PUT /api/memories/{id}", s.auth(s.changeMemory))
@@ -1146,6 +1155,113 @@ func (s *Server) importConnections(w http.ResponseWriter, r *http.Request) {
 	s.connections(w, r)
 }
 
+func (s *Server) books(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.B.Books())
+}
+
+// addBook takes an EPUB sent as the "file" field of a form.
+func (s *Server) addBook(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 300<<20)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		fail(w, 400, "send the book as a file")
+		return
+	}
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			fail(w, 400, "no book was sent")
+			return
+		}
+		if part.FormName() != "file" {
+			continue
+		}
+		book, err := s.B.AddBook(part)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, book)
+		return
+	}
+}
+
+func (s *Server) book(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	book, ok := s.B.S.GetBook(id)
+	if !ok {
+		fail(w, 404, "no such book")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"book": book, "kept": s.B.BookMemories(book)})
+}
+
+func (s *Server) removeBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.RemoveBook(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) bookCover(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	book, ok := s.B.S.GetBook(id)
+	if !ok || book.CoverPath == "" {
+		fail(w, 404, "no cover")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, book.CoverPath)
+}
+
+func (s *Server) searchBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	book, ok := s.B.S.GetBook(id)
+	if !ok {
+		fail(w, 404, "no such book")
+		return
+	}
+	writeJSON(w, 200, s.B.SearchBook(book, r.URL.Query().Get("q"), 40))
+}
+
+// readBook queues a book: to read for the first time, again, or once
+// more after it failed.
+func (s *Server) readBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.QueueBook(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) unqueueBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.UnqueueBook(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) bookKind(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	var in struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable: "+err.Error())
+		return
+	}
+	if err := s.B.SetBookKind(id, in.Kind); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // forgetMemory puts a memory away. It is archived, not deleted, so a
 // slip can be put right in the database.
 func (s *Server) forgetMemory(w http.ResponseWriter, r *http.Request) {
@@ -1159,6 +1275,7 @@ func (s *Server) forgetMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.B.Bus.Publish("podcasts", nil)
+	s.B.Bus.Publish("books", nil)
 	s.B.Bus.Publish("memories", nil)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

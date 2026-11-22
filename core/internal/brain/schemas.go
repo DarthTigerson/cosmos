@@ -129,6 +129,17 @@ var podThinkSchema = json.RawMessage(`{"type":"object","properties":{
  "share":{"type":"string","maxLength":260}},
  "required":["summary","takeaways","thoughts","share"]}`)
 
+var bookDigestSchema = json.RawMessage(`{"type":"object","properties":{
+ "digest":{"type":"string","maxLength":600},
+ "learned":{"type":"array","maxItems":6,"items":{"type":"string","maxLength":300}}},
+ "required":["digest","learned"]}`)
+
+var bookThinkSchema = json.RawMessage(`{"type":"object","properties":{
+ "summary":{"type":"string","maxLength":600},
+ "thoughts":{"type":"array","maxItems":3,"items":{"type":"string","maxLength":300}},
+ "share":{"type":"string","maxLength":260}},
+ "required":["summary","thoughts","share"]}`)
+
 var titleSchema = json.RawMessage(`{"type":"object","properties":{
  "title":{"type":"string","maxLength":48}},
  "required":["title"]}`)

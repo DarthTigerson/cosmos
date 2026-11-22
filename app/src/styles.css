@@ -661,6 +661,9 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
 .pod-stages .done .bar i { background: var(--sys); }
 .pod-stages .bar.busy i { animation: pod-busy 1.6s ease-in-out infinite; }
 @keyframes pod-busy { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+/* The stage being worked on is a plain step, not the presence panel that
+   shares its class name. */
+.pod-stages li.now { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; padding: 0; background: none; border: 0; border-radius: 0; }
 .pod-stages .now .stage-name { color: var(--text); }
 .pod-stages .done .stage-name { color: var(--muted); }
 .stage-name { font-size: 14px; font-weight: 500; }
@@ -726,6 +729,27 @@ legend { font: 600 16px/1.3 var(--display); padding: 0 8px; }
 .pod-timeline .hint { font: 400 11px/1 var(--mono); color: var(--sys); }
 .pod-transcript { white-space: pre-wrap; font-size: 14px; color: var(--muted); max-height: 50vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .pod-transcript mark { background: var(--nova); color: var(--ground); border-radius: 2px; }
+
+/* Books borrow the pod-* classes; these are what they add. */
+.book-drop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 12px; text-align: center; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--nova); font-size: 14px; cursor: pointer; }
+.book-drop:hover, .book-drop.over { background: var(--panel); border-color: var(--nova); }
+.book-drop .sub { color: var(--dim); }
+.book-drop input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; opacity: 0; cursor: pointer; }
+.book-readas { display: flex; align-items: center; gap: 8px; font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; }
+.book-readas select { width: auto; min-height: 36px; font-size: 13px; padding: 0 10px; }
+.book-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.book-episode { grid-template-columns: minmax(0, 1fr); }
+.book-kept li { grid-template-columns: 56px minmax(0, 1fr) auto; }
+.book-kept .pod-chip { justify-self: start; white-space: nowrap; }
+.book-chapters { display: flex; flex-direction: column; gap: 6px; }
+.book-chapters li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.book-chapters li.open { border-color: var(--line-strong); }
+.book-chapters button { width: 100%; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 14px; border: 0; background: none; text-align: left; color: var(--text); font-size: 14px; }
+.book-chapters .num { font: 400 12px var(--mono); color: var(--dim); }
+.book-chapters p { padding: 0 14px 12px 50px; font-size: 14px; color: var(--muted); }
+.book-matches li { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line-soft); font-size: 14px; color: var(--muted); }
+.book-matches li:first-child { border-top: 0; }
+.book-matches mark { background: var(--nova); color: var(--ground); border-radius: 2px; }
 
 /* Podcasts on a narrow window: these follow the rules above so they win. */
 @media (max-width: 1000px) {
@@ -988,6 +1012,11 @@ kbd { display: inline-block; padding: 0 4px; border: 1px solid var(--line); bord
 /* Faces she has seen: the question of who it is, and someone's pictures. */
 .face-pic { flex: none; display: inline-block; overflow: hidden; border-radius: 10px; background: var(--raised); }
 .face-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+button.face-pic { padding: 0; border: 0; cursor: zoom-in; }
+button.face-pic:disabled { cursor: default; }
+.face-big { padding: 0; border: 0; border-radius: 14px; background: var(--raised); max-width: min(90vw, 720px); max-height: 90vh; overflow: hidden; cursor: zoom-out; }
+.face-big::backdrop { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); }
+.face-big img { display: block; width: 100%; height: auto; max-height: 90vh; object-fit: contain; image-rendering: auto; }
 .face-ask { display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; }
 .face-answers { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .face-name { display: flex; gap: 6px; }

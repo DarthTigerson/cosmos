@@ -806,7 +806,7 @@ func notHer(cfg config.Config, text string) string {
 func (b *Brain) heardNotes(mems []store.Memory, query string, now time.Time) (string, []string) {
 	heard := []store.Memory{}
 	for _, m := range mems {
-		if m.Kind == "heard" || m.Kind == "view" {
+		if m.Kind == "heard" || (m.Kind == "view" && !isBookMemory(m)) {
 			heard = append(heard, m)
 		}
 	}

@@ -69,6 +69,9 @@ type Config struct {
 	// Podcasts lets her check the shows she follows and listen to new
 	// episodes on her own.
 	Podcasts bool `json:"podcasts"`
+	// Books lets her read the books the user gives her, while they are
+	// quiet or she is asleep.
+	Books bool `json:"books"`
 	// Voice is the name of the system voice she speaks with. Empty
 	// means the computer's own default.
 	Voice string `json:"voice"`
@@ -133,6 +136,7 @@ func Default() Config {
 		WeatherWatch:     true,
 		WebSearch:        true,
 		Podcasts:         true,
+		Books:            true,
 		HearLanguage:     "en",
 		ListenWindow:     25,
 		HearPause:        0.9,

@@ -97,7 +97,7 @@ func Open(path string) (*Store, error) {
 	}
 	// One connection keeps writes ordered and makes :memory: behave.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + sightSchema); err != nil {
+	if _, err := db.Exec(schema + sightSchema + booksSchema); err != nil {
 		db.Close()
 		return nil, err
 	}

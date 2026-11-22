@@ -291,6 +291,44 @@ export interface PodcastsView {
   unheard: Record<string, number>
 }
 
+export type BookChapter = { n: number; title: string; words: number; parts: number; notes: string[]; digest: string; learned: string[] }
+
+export type Book = {
+  id: number
+  title: string
+  author: string
+  kind: 'fiction' | 'nonfiction'
+  has_cover: boolean
+  added_at: string
+  started_at: string
+  finished_at: string
+  status: 'waiting' | 'queued' | 'opening' | 'reading' | 'digesting' | 'thinking' | 'done' | 'failed'
+  // "chapter 4 of 7 · part 51 of 116" while reading, "chapter 3 of 7" while digesting.
+  stage_note: string
+  error: string
+  words: number
+  parts: number
+  // Parts read so far.
+  part: number
+  summary: string
+  thoughts: string[]
+  share: string
+  chapters: BookChapter[]
+  // Read, or being read, during her sleep.
+  asleep: boolean
+}
+
+export type BooksView = {
+  enabled: boolean
+  // There is a current book but she is waiting because you are talking.
+  paused: boolean
+  books: Book[]
+  current: Book | null
+  queued: Book[]
+  done: Book[]
+  failed: Book[]
+}
+
 export interface ListItem {
   id: number
   list: string
@@ -383,7 +421,7 @@ export interface ModelsView {
 }
 
 export interface Signal {
-  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing' | 'memories' | 'people' | 'interrupted'
+  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'books' | 'writing' | 'memories' | 'people' | 'interrupted'
   data: unknown
 }
 

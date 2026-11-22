@@ -320,6 +320,10 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 		}
 	}
 
+	// ----- read -----
+	// The sleeper is loaded and the night is quiet: a good time to read.
+	b.readAsleep(ctx)
+
 	// ----- tidy -----
 	report.Tidied = b.tidy(ctx, cfg, now)
 

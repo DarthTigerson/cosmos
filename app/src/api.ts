@@ -62,6 +62,21 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   return data as T
 }
 
+// upload sends a file as a form. The browser sets the content type itself,
+// since only it knows the boundary between the parts.
+export async function upload<T>(path: string, form: FormData): Promise<T> {
+  const c = await conn()
+  let res: Response
+  try {
+    res = await fetch(c.baseUrl + path, { method: 'POST', headers: { Authorization: `Bearer ${c.token}` }, body: form })
+  } catch {
+    throw new Error('The core is not answering. Is it still running?')
+  }
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error ?? `The core answered ${res.status}.`)
+  return data as T
+}
+
 // apiAudio asks the core for sound and returns the raw bytes.
 export async function apiAudio(path: string, body: unknown): Promise<ArrayBuffer> {
   const c = await conn()
