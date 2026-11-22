@@ -66,6 +66,14 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   const listening = ear !== 'off'
   const [seeing, setSeeing] = useState(false)
   const [watching, setWatching] = useState<Watching>('pointer')
+  // Whether the small picture of what she sees is shown; right-click the
+  // camera button to switch it.
+  const [preview, setPreview] = useState(() => kept('cosmos:her-sight-preview') !== 'off')
+  function togglePreview() {
+    const next = !preview
+    setPreview(next)
+    keep('cosmos:her-sight-preview', next ? 'on' : 'off')
+  }
   const video = useRef<HTMLVideoElement>(null)
   const sight = useRef<{ stop: () => void } | null>(null)
   const aloud = useRef(voice)
@@ -304,7 +312,7 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
         {listening && <i className="her-sense-live" aria-hidden="true" />}
       </button>
       {shown && (
-        <button type="button" className={`her-sense ${seeing ? 'on' : ''}`} aria-pressed={seeing} aria-label={seeing ? 'Turn her camera off' : 'Let her see you'} title={seeing ? 'Turn her camera off' : 'Let her see you'} disabled={asleep} onClick={() => setSeeing(!seeing)}>
+        <button type="button" className={`her-sense ${seeing ? 'on' : ''}`} aria-pressed={seeing} aria-label={seeing ? 'Turn her camera off' : 'Let her see you'} title={`${seeing ? 'Turn her camera off' : 'Let her see you'} · right-click to ${preview ? 'hide' : 'show'} her view`} disabled={asleep} onClick={() => setSeeing(!seeing)} onContextMenu={(e) => { e.preventDefault(); togglePreview() }}>
           <SenseIcon name="see" off={!seeing} />
           {seeing && <i className="her-sense-live" aria-hidden="true" />}
         </button>
@@ -319,7 +327,7 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
           <canvas ref={canvas} role="img" aria-label={`${state?.name ?? 'She'}, ${word}`} />
           {!ready && !problem && <span className="avatar-wait">She is arriving…</span>}
           {/* What she sees, small, mirrored as a mirror would show you. */}
-          <div className="her-sight" hidden={!seeing}>
+          <div className="her-sight" hidden={!seeing || !preview}>
             <video ref={video} aria-label="What her camera sees" />
             <span>
               <i aria-hidden="true" />
