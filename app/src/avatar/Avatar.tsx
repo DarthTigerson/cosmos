@@ -4,15 +4,8 @@ import type { State, StepSignal, StreamEvent } from '../types'
 import { type Ears, openEars } from './ears'
 import type { Watching } from './sight'
 import { sentences, Speaker } from './speech'
-import { type Face, Stage } from './stage'
-
-// Which of the model's faces goes with each feeling, and how strongly.
-const faces: Record<string, [Face['expression'], number]> = {
-  glad: ['happy', 0.6], warmth: ['happy', 0.5], tenderness: ['relaxed', 0.7], amusement: ['happy', 0.8],
-  pride: ['happy', 0.65], hope: ['happy', 0.4], curiosity: ['surprised', 0.3],
-  concern: ['sad', 0.3], worry: ['sad', 0.4], sadness: ['sad', 0.7], hurt: ['sad', 0.6], unease: ['sad', 0.25],
-  anger: ['angry', 0.55],
-}
+import { shownFor } from './feelings'
+import { Stage } from './stage'
 
 // The words of a line, lower case, without punctuation.
 function wordsOf(line: string): string[] {
@@ -196,10 +189,19 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   const feeling = state?.feeling ?? 'calm'
   const warmth = state?.mood.warmth ?? 0.6
   const energy = state?.mood.energy ?? 0.5
+  const confidence = state?.mood.confidence ?? 0.6
+  const since = state?.mood.feeling_at
+  // A feeling shows plainly when new and settles over the next twenty
+  // minutes, so her face is looked at again every half minute.
+  const [, setNow] = useState(0)
   useEffect(() => {
-    const [expression, intensity] = faces[feeling] ?? ['neutral', 0]
-    stage.current?.setFace({ expression, intensity, warmth, energy })
-  }, [feeling, warmth, energy, ready])
+    const id = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+  useEffect(() => {
+    const { look, manner } = shownFor(feeling, { warmth, energy, confidence }, since)
+    stage.current?.setFace({ look, manner, energy })
+  })
 
   // With her voice on she speaks as she writes. Each sentence is said as soon as
   // the next one has begun; the last waits for the finished reply, since

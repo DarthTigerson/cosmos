@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { type VRM, type VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
+import { type VRM, VRMExpression, VRMExpressionMorphTargetBind, type VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import { loadMixamoAnimation } from './mixamo'
+import { type Look, type Manner, PARTS, type Part, usual } from './feelings'
 import type { Copied, Seen } from './sight'
 
 // The stage draws her 3D model and keeps her alive between words.
@@ -27,11 +28,9 @@ export interface Mouth {
 const MOUTH = ['aa', 'ih', 'ou', 'ee', 'oh'] as const
 
 export interface Face {
-  // One of the model's expression presets, and how strongly to wear it.
-  expression: 'neutral' | 'happy' | 'angry' | 'sad' | 'relaxed' | 'surprised'
-  intensity: number
-  // 0 to 1. A warm mood leaves a trace of a smile even when calm.
-  warmth: number
+  // Her face, from the parts of her model, and her manner (feelings.ts).
+  look: Look
+  manner: Manner
   // 0 to 1. Low energy slows her down and lowers her head a little.
   energy: number
 }
@@ -41,13 +40,20 @@ const CLIPS: Record<string, string> = {
   thinking: './animations/thinking.fbx',
   'look-around': './animations/look-around.fbx',
 }
-const PRESETS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'] as const
 const FADE = 0.6
 // Thirty frames a second is plenty for a talking figure, and leaves the
 // graphics card to the language models.
 const FRAME = 1 / 30
 
 const ease = (cur: number, target: number, rate: number, dt: number) => cur + (target - cur) * Math.min(1, rate * dt)
+// A critically damped spring: it speeds up and slows down into place, as a
+// head does, where easing starts fast and creeps in. Higher freq is quicker.
+interface Spring { x: number; v: number }
+const spring = (sp: Spring, target: number, freq: number, dt: number) => {
+  sp.v += (freq * freq * (target - sp.x) - 2 * freq * sp.v) * dt
+  sp.x += sp.v * dt
+  return sp.x
+}
 const rand = (a: number, b: number) => a + Math.random() * (b - a)
 
 export class Stage {
@@ -60,7 +66,11 @@ export class Stage {
   private action: THREE.AnimationAction | null = null
   private gaze = new THREE.Object3D()
   private pose: Pose = 'idle'
-  private face: Face = { expression: 'neutral', intensity: 0, warmth: 0.6, energy: 0.5 }
+  private face: Face = { look: {}, manner: usual, energy: 0.5 }
+  // Her manner as shown, eased so a change of feeling settles in.
+  private manner: Manner = { ...usual }
+  // The parts her model has, of those feelings use.
+  private parts: Part[] = []
   private mouth: Mouth = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 }
   private shown: Mouth = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 }
   private expr: Record<string, number> = {}
@@ -69,7 +79,7 @@ export class Stage {
   // What her camera shows, when it is on; null when it is off.
   private seen: Seen | null = null
   // The copied face as shown, eased so it does not twitch.
-  private mirror: Copied = { smile: 0, blinkLeft: 0, blinkRight: 0, browUp: 0, frown: 0, jawOpen: 0, yaw: 0, pitch: 0, roll: 0 }
+  private mirror: Copied = { smile: 0, blinkLeft: 0, blinkRight: 0, browUp: 0, frown: 0, browInner: 0, wide: 0, down: 0, jawOpen: 0, funnel: 0, pucker: 0, stretch: 0, squint: 0, yaw: 0, pitch: 0, roll: 0 }
   private copying = 0
   private t = 0
   private since = 0
@@ -81,7 +91,19 @@ export class Stage {
     lookX: 0, lookY: 0, toX: 0, toY: 0, nextLook: 1.5,
     nod: 0, loud: 0, thinkingFor: 0, nextBreak: rand(20, 40), breakFor: 0,
     asleep: 0,
+    // Tiny shifts of the eyes while they rest on something, as living eyes
+    // never hold quite still.
+    microX: 0, microY: 0, nextMicro: 0.4,
+    lastGX: 0, lastGY: 0,
   }
+  // Her head follows her eyes, a beat behind and not all the way: the eyes
+  // jump, the head turns after them and shares the angle.
+  private headX: Spring = { x: 0, v: 0 }
+  private headY: Spring = { x: 0, v: 0 }
+  private bodyX: Spring = { x: 0, v: 0 }
+  private copyYaw: Spring = { x: 0, v: 0 }
+  private copyPitch: Spring = { x: 0, v: 0 }
+  private copyRoll: Spring = { x: 0, v: 0 }
   private resize: ResizeObserver
   onReady: () => void = () => {}
   onError: (message: string) => void = () => {}
@@ -125,6 +147,7 @@ export class Stage {
       this.vrm = vrm
       this.mixer = new THREE.AnimationMixer(vrm.scene)
       if (vrm.lookAt) vrm.lookAt.target = this.gaze
+      this.addParts(vrm)
       this.frame()
       // The idle clip first, so she is never seen in the arms-out rest
       // pose; the others can arrive when they arrive.
@@ -135,6 +158,24 @@ export class Stage {
       void this.clip('look-around')
     } catch (e) {
       this.onError(`Her model could not be loaded: ${(e as Error).message}`)
+    }
+  }
+
+  // Each brow, eye and mouth shape of her model becomes an expression of
+  // its own, so feelings can mix them rather than wear one stock face.
+  private addParts(vrm: VRM) {
+    const em = vrm.expressionManager
+    if (!em) return
+    for (const part of PARTS) {
+      const e = new VRMExpression(`part:${part}`)
+      vrm.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        const index = mesh.isMesh ? mesh.morphTargetDictionary?.[part] : undefined
+        if (index !== undefined) e.addBind(new VRMExpressionMorphTargetBind({ primitives: [mesh], index, weight: 1 }))
+      })
+      if (e.binds.length === 0) continue
+      em.registerExpression(e)
+      this.parts.push(part)
     }
   }
 
@@ -279,9 +320,13 @@ export class Stage {
     // She looks at you. Every few seconds her eyes drift a little and
     // come back; while thinking they go up and away; a moving pointer
     // draws a glance.
+    const fm = this.face.manner
+    const mn = this.manner
+    for (const k of Object.keys(mn) as (keyof Manner)[]) mn[k] = ease(mn[k], fm[k], 1.2, dt)
     s.nextLook -= dt
     if (s.nextLook <= 0) {
-      const away = Math.random() < (talking ? 0.25 : 0.45)
+      // Uneasy, her eyes leave you more often; warm, they stay.
+      const away = Math.random() < Math.min(0.85, (talking ? 0.25 : 0.45) * mn.away)
       s.toX = away ? rand(-0.28, 0.28) : rand(-0.04, 0.04)
       s.toY = away ? rand(-0.1, 0.14) : rand(-0.03, 0.03)
       s.nextLook = away ? rand(0.5, 1.4) : rand(1.6, 4.5)
@@ -289,6 +334,7 @@ export class Stage {
     }
     let gx = s.toX
     let gy = s.toY
+    gy -= mn.down
     if (thinking && s.thinkingFor > 0.6) { gx = 0.35; gy = 0.3 }
     const watching = this.seen?.watching ?? 'pointer'
     if (watching === 'motion') { gx = this.seen!.x * 0.5; gy = -this.seen!.y * 0.3 }
@@ -300,8 +346,29 @@ export class Stage {
     for (const k of Object.keys(this.mirror) as (keyof Copied)[]) this.mirror[k] = ease(this.mirror[k], want ? want[k] : 0, 12, dt)
     const mr = this.mirror
     const c = this.copying
-    s.lookX = ease(s.lookX, gx, 7, dt)
-    s.lookY = ease(s.lookY, gy, 7, dt)
+    const seeing = watching !== 'pointer'
+    // Resting on something, the eyes make small jumps around it.
+    s.nextMicro -= dt
+    if (s.nextMicro <= 0) {
+      s.microX = seeing ? rand(-0.018, 0.018) : 0
+      s.microY = seeing ? rand(-0.01, 0.01) : 0
+      s.nextMicro = rand(0.25, 0.9)
+    }
+    gx += s.microX
+    gy += s.microY
+    // A big shift of gaze often comes with a blink.
+    if (Math.hypot(gx - s.lastGX, gy - s.lastGY) > 0.22 && Math.random() < 0.5) s.blink = 1
+    s.lastGX = gx
+    s.lastGY = gy
+    // The eyes jump; the head and then the body come round after them.
+    s.lookX = ease(s.lookX, gx, 20, dt)
+    s.lookY = ease(s.lookY, gy, 20, dt)
+    const hx = spring(this.headX, gx, 7 * pace, dt)
+    const hy = spring(this.headY, gy, 7 * pace, dt)
+    const bx = spring(this.bodyX, watching === 'motion' ? gx : 0, 2.5, dt)
+    const cy = spring(this.copyYaw, mr.yaw * c, 9, dt)
+    const cp = spring(this.copyPitch, mr.pitch * c, 9, dt)
+    const cr = spring(this.copyRoll, mr.roll * c, 9, dt)
     const head = this.bone('head')
     const eye = head ? head.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 1.4, 0)
     this.gaze.position.set(eye.x + s.lookX, eye.y + s.lookY - s.asleep * 0.6, 1.5)
@@ -326,15 +393,16 @@ export class Stage {
     const droop = s.asleep * 0.42 + (1 - this.face.energy) * 0.05
     this.turn('chest', breath * 0.014, 0, 0)
     this.turn('upperChest', breath * 0.01, 0, 0)
-    this.turn('spine', s.asleep * 0.06, Math.sin(t * 0.33) * 0.012, 0)
+    // Following something across the room, her body turns a little too.
+    this.turn('spine', s.asleep * 0.06, Math.sin(t * 0.33) * 0.012 + bx * 0.12, 0)
     this.turn('neck',
-      droop * 0.4 - s.lookY * 0.25 + s.nod * 0.03,
-      s.lookX * 0.35,
-      s.asleep * 0.06)
+      droop * 0.4 - hy * 0.25 + s.nod * 0.03 + cp * 0.3,
+      hx * 0.35 + cy * 0.3,
+      s.asleep * 0.06 + cr * 0.3)
     this.turn('head',
-      droop * 0.6 - s.lookY * 0.35 + s.nod * 0.06 * Math.sin(t * 5.2) + Math.sin(t * 0.7) * 0.008 + mr.pitch * 0.6 * c,
-      s.lookX * 0.5 + (talking ? Math.sin(t * 1.3) * 0.03 * (0.4 + s.loud) : 0) + mr.yaw * 0.6 * c,
-      s.asleep * 0.1 + Math.sin(t * 0.45) * 0.01 + (talking ? Math.sin(t * 0.9) * 0.025 * s.loud : 0) + mr.roll * 0.7 * c)
+      droop * 0.6 - hy * 0.35 + s.nod * 0.06 * Math.sin(t * 5.2) + Math.sin(t * 0.7) * 0.008 + cp * 0.55 + mn.chin * (1 - c),
+      hx * 0.5 + (talking ? Math.sin(t * 1.3) * 0.03 * (0.4 + s.loud) : 0) + cy * 0.55,
+      s.asleep * 0.1 + Math.sin(t * 0.45) * 0.01 + (talking ? Math.sin(t * 0.9) * 0.025 * s.loud : 0) + cr * 0.6 + mn.tilt * (1 - c))
 
     // ----- face -----
     const em = vrm.expressionManager
@@ -344,7 +412,7 @@ export class Stage {
         s.blink = 1
         // Sometimes twice, as people do.
         s.again = !s.again && Math.random() < 0.18
-        s.nextBlink = s.again ? 0.22 : rand(2.4, 6) / (0.6 + this.face.energy * 0.8)
+        s.nextBlink = s.again ? 0.22 : rand(2.4, 6) / ((0.6 + this.face.energy * 0.8) * this.manner.blinks)
       }
       s.blink = Math.max(0, s.blink - dt * 8)
       // Copying, your blinks are hers, eye by eye; her own fade away.
@@ -353,25 +421,45 @@ export class Stage {
       em.setValue('blinkRight', mr.blinkRight * c)
       // While she speaks her mouth stays with her words; otherwise it
       // opens as yours does.
-      for (const k of MOUTH) em.setValue(k, k === 'aa' ? Math.max(this.shown.aa, mr.jawOpen * c * (1 - Math.min(1, loud * 3))) : this.shown[k])
-      // Her mood shows: the feeling she has now, over a trace of a smile
-      // when she is warm. A wide mouth while speaking would fight the
-      // smile, so the expression gives way a little to speech.
-      const rest = Math.max(0, this.face.warmth - 0.5) * 0.5
-      for (const p of PRESETS) {
-        let target = p === this.face.expression ? this.face.intensity : 0
-        if (p === 'relaxed' && this.face.expression === 'neutral') target = rest
-        // Copying, your face leads and her mood stays faintly underneath.
-        if (c > 0.01) {
-          const yours = p === 'happy' ? mr.smile : p === 'surprised' ? mr.browUp * 0.8 : p === 'angry' ? mr.frown * 0.6 : 0
-          target = target * (1 - c * 0.8) + yours * c
-        }
-        target *= (1 - s.asleep) * (1 - loud * 0.5)
-        const cur = this.expr[p] ?? 0
-        const next = ease(cur, target, 3, dt)
-        this.expr[p] = next
-        if (next > 0.001 || cur > 0.001) em.setValue(p, next)
+      const quiet = c * (1 - Math.min(1, loud * 3))
+      const yourMouth: Mouth = {
+        aa: mr.jawOpen * (1 - mr.funnel * 0.5),
+        oh: mr.funnel * 0.9,
+        ou: mr.pucker * 0.8,
+        ee: mr.stretch * 0.6,
+        ih: mr.stretch * 0.3,
       }
+      for (const k of MOUTH) em.setValue(k, Math.max(this.shown[k], yourMouth[k] * quiet))
+      // Her mood shows, mixed from the parts of her face. Copying, your
+      // face leads and hers stays faintly underneath. A wide mouth while
+      // speaking would fight a smile, so the mouth gives way to speech.
+      const look = this.face.look
+      const yours: Look = c > 0.01 ? {
+        Fcl_MTH_Fun: mr.smile * (1 - mr.jawOpen),
+        Fcl_MTH_Joy: mr.smile * mr.jawOpen * 1.2,
+        Fcl_EYE_Fun: mr.smile * 0.3 + mr.squint * 0.5,
+        Fcl_BRW_Fun: mr.smile * 0.2,
+        Fcl_BRW_Surprised: mr.browUp * 0.9,
+        Fcl_BRW_Sorrow: Math.max(0, mr.browInner - mr.browUp) * 1.1,
+        Fcl_EYE_Spread: mr.wide * 0.8,
+        Fcl_BRW_Angry: mr.frown * 0.8,
+        Fcl_EYE_Angry: mr.frown * 0.3,
+        Fcl_MTH_Sorrow: mr.down * 0.8,
+      } : {}
+      this.parts.forEach((p, i) => {
+        // A felt face is never held perfectly still; each part drifts a
+        // little, out of step with the others.
+        const life = 1 + Math.sin(t * (0.35 + i * 0.037) + i * 1.7) * 0.1
+        let target = Math.min(1, (look[p] ?? 0) * life * (1 - c * 0.8) + (yours[p] ?? 0) * c)
+        target *= 1 - s.asleep
+        if (p.startsWith('Fcl_MTH')) target *= 1 - Math.min(1, loud * 1.5)
+        const cur = this.expr[p] ?? 0
+        // A feeling comes on quicker than it fades; copying keeps up with you.
+        const rate = c > 0.3 ? 14 : target > cur ? 2.5 : 1.1
+        const next = ease(cur, target, rate, dt)
+        this.expr[p] = next
+        if (next > 0.001 || cur > 0.001) em.setValue(`part:${p}`, next)
+      })
     }
     vrm.update(dt)
   }

@@ -5,6 +5,8 @@ export interface Mood {
   energy: number
   confidence: number
   feeling: string
+  // When the feeling came, RFC 3339.
+  feeling_at?: string
 }
 
 export interface State {

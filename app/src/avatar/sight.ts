@@ -19,7 +19,18 @@ export interface Copied {
   blinkRight: number
   browUp: number
   frown: number
+  // The inner brows raised alone, as in worry; eyes opened wide; the
+  // corners of the mouth pulled down.
+  browInner: number
+  wide: number
+  down: number
   jawOpen: number
+  // Lips pushed into an O, pursed, pulled wide; cheeks raised and eyes
+  // narrowed, as in a real smile.
+  funnel: number
+  pucker: number
+  stretch: number
+  squint: number
   // Head turn and tilt in radians, mirrored.
   yaw: number
   pitch: number
@@ -35,9 +46,10 @@ export interface Seen {
   face?: Copied
 }
 
-// Looked at about twelve times a second: enough to follow someone, and
-// light beside her models. A picture is sent only once the last is done.
-const EVERY_MS = 80
+// Looked at up to twenty-five times a second, off her drawing's thread;
+// a picture is sent only once the last is done, so a slow Mac simply
+// looks less often.
+const EVERY_MS = 40
 // Pictures are made small before they are looked at.
 const PW = 320
 const PH = 240
