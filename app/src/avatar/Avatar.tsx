@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, apiHear, useSignals } from '../api'
 import type { State, StepSignal, StreamEvent } from '../types'
 import { type Ears, openEars } from './ears'
+import { HearingMark, type HearingTone } from './HearingMark'
 import type { Watching } from './sight'
 import { sentences, Speaker } from './speech'
 import { shownFor } from './feelings'
@@ -78,6 +79,8 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   // Until when what is said is taken as meant for her without her name:
   // held open while she works on a reply, then open a little longer.
   const [talking, setTalking] = useState(false)
+  // How loud the room is, 0 to 1, for the mark in the listen button.
+  const loudness = useRef(0)
   const openUntil = useRef(0)
   const windowFor = useRef(25)
   // Set when you said goodbye: the window shuts after this reply.
@@ -351,6 +354,9 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
             hushed.current = true
           }
         },
+        level: (v) => {
+          loudness.current = v
+        },
         dropped: () => {
           speaker.current?.duck(false)
           setEar((cur) => (cur === 'off' ? 'off' : 'listening'))
@@ -452,6 +458,9 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
                     ? 'with you'
                     : `listening for ${state?.name ?? 'her name'}`
                 : 'here'
+  // Whose voice the mark takes it to be. Listening for her name, a voice
+  // is grey until it is clear it is for her.
+  const hearingTone: HearingTone = ear === 'writing' ? 'writing' : ear === 'hearing' ? (byName && !talking ? 'other' : 'you') : 'rest'
   const lit = word === 'talking' || word === 'hearing you' || word === 'thinking'
   const status = (
     <span className={`avatar-state ${lit ? 'lit' : ''} ${asleep ? 'asleep' : ''}`} role="status">
@@ -465,8 +474,7 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
         <SenseIcon name="voice" off={!voice} />
       </button>
       <button type="button" className={`her-sense ${listening ? 'on' : ''}`} aria-pressed={listening} aria-label={listening ? 'Stop her listening' : 'Talk to her'} title={listening ? 'Stop her listening' : 'Talk to her'} disabled={asleep && !listening} onClick={() => (listening ? stopListening() : void startListening())}>
-        <SenseIcon name="listen" off={!listening} />
-        {listening && <i className="her-sense-live" aria-hidden="true" />}
+        {listening ? <HearingMark level={loudness} tone={hearingTone} /> : <SenseIcon name="listen" off />}
       </button>
       {shown && (
         <button type="button" className={`her-sense ${seeing ? 'on' : ''}`} aria-pressed={seeing} aria-label={seeing ? 'Turn her camera off' : 'Let her see you'} title={`${seeing ? 'Turn her camera off' : 'Let her see you'} · right-click to ${preview ? 'hide' : 'show'} her view`} disabled={asleep} onClick={() => setSeeing(!seeing)} onContextMenu={(e) => { e.preventDefault(); togglePreview() }}>
