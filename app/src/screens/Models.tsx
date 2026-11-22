@@ -307,6 +307,21 @@ export function Models({ asleep }: { asleep: boolean }) {
                               <Text id={`${k}-ctx`} label="Context size" numeric value={String(launch.context_size)} onCommit={(v) => save(k, { launch: { ...launch, context_size: Number.parseInt(v, 10) || 8192 } })} />
                               <Text id={`${k}-ngl`} label="GPU layers" numeric value={String(launch.gpu_layers)} onCommit={(v) => save(k, { launch: { ...launch, gpu_layers: Number.parseInt(v, 10) || 0 } })} />
                               <Text id={`${k}-bin`} label="llama-server program (optional)" placeholder={data.binary || 'llama-server'} value={launch.binary} onCommit={(v) => save(k, { launch: { ...launch, binary: v } })} />
+                              {k === 'main' && (
+                                <div className="field">
+                                  <label htmlFor="main-mmproj">Vision projector (lets her see pictures)</label>
+                                  <select id="main-mmproj" value={launch.mmproj ?? ''} onChange={(e) => save(k, { launch: { ...launch, mmproj: e.target.value } })}>
+                                    <option value="">None: she cannot see pictures</option>
+                                    {(data.files ?? [])
+                                      .filter((f) => f.name.includes('mmproj'))
+                                      .map((f) => (
+                                        <option key={f.path} value={f.path}>
+                                          {f.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+                              )}
                             </div>
                           </details>
                         )}

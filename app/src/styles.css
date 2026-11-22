@@ -984,3 +984,21 @@ kbd { display: inline-block; padding: 0 4px; border: 1px solid var(--line); bord
 .tb-sub { padding-left: 12px; }
 .tb-sub > span:first-child { color: var(--muted); }
 .tb-sub.dim > span:last-child { color: var(--dim); font-weight: 400; }
+
+/* Faces she has seen: the question of who it is, and someone's pictures. */
+.face-pic { flex: none; display: inline-block; overflow: hidden; border-radius: 10px; background: var(--raised); }
+.face-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.face-ask { display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; }
+.face-answers { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.face-name { display: flex; gap: 6px; }
+.face-name input { flex: 1; min-width: 0; }
+.quick button[aria-pressed='true'] { border-color: var(--nova); color: var(--nova); }
+.face-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.face-row li { position: relative; }
+.face-forget { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 99px; background: rgba(0, 0, 0, 0.55); color: #fff; font: 400 12px/18px var(--mono); opacity: 0; transition: opacity 0.15s; }
+.face-row li:hover .face-forget, .face-forget:focus-visible { opacity: 1; }
+.face-voice { margin: 0; font-size: 12px; }
+.problem-inline { margin: 0; color: var(--danger, #e07a7a); font-size: 12px; }
+.known-voices { display: flex; flex-direction: column; gap: 4px; }
+.reading { display: block; margin-top: 6px; color: var(--text); font-style: italic; quotes: '“' '”'; }
+@media (max-width: 520px) { .face-ask { flex-direction: column; } }

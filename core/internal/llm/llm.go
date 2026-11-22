@@ -22,6 +22,26 @@ import (
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	// Images go with the words, as data: URIs ("data:image/jpeg;base64,...").
+	// They are only ever sent to the model server on this computer.
+	Images []string `json:"-"`
+}
+
+// MarshalJSON writes a message with pictures as OpenAI content parts, the
+// shape llama-server reads when it has a vision projector loaded.
+func (m Message) MarshalJSON() ([]byte, error) {
+	if len(m.Images) == 0 {
+		return json.Marshal(struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{m.Role, m.Content})
+	}
+	parts := []map[string]any{}
+	for _, img := range m.Images {
+		parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": img}})
+	}
+	parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+	return json.Marshal(map[string]any{"role": m.Role, "content": parts})
 }
 
 type Request struct {

@@ -234,6 +234,8 @@ func reachOutTitle(i store.Intention) string {
 		return "A thought"
 	case "followup":
 		return "Checking in"
+	case "face":
+		return "Who is this?"
 	}
 	return "From her"
 }
@@ -248,6 +250,8 @@ func (b *Brain) instructionFor(cfg config.Config, i store.Intention) (string, st
 		return i.Text + " Write a short weather update for " + cfg.UserName + ": what it is doing now and what is coming in the next hours. One or two sentences.", facts
 	case "podcast":
 		return "You have just finished listening to a podcast episode (" + i.Reason + "). You wanted to bring this up with " + cfg.UserName + ": \"" + i.Text + "\". Say it in your own words in one or two sentences, and say which show you heard it on. The people talking were the show's hosts. You and " + cfg.UserName + " have not talked about this episode: never say \"what we talked about\" or \"as we discussed\". If it reminds you of something " + cfg.UserName + " is doing, say it made you think of that.", facts
+	case "face":
+		return "You saw someone through your camera and you are not sure who they are. Your message is shown with the picture of them. Ask " + cfg.UserName + " this, in your own words and briefly, without describing the picture: \"" + i.Text + "\"", facts
 	case "reflection":
 		return "While you slept last night you had this thought: \"" + i.Text + "\". Share it with " + cfg.UserName + " in your own words, briefly.", facts
 	case "brief":
@@ -302,7 +306,13 @@ func (b *Brain) deliver(ctx context.Context, cfg config.Config, i store.Intentio
 		return fmt.Errorf("the writer returned nothing")
 	}
 	now := b.Now()
-	meta, _ := json.Marshal(map[string]any{"intention_id": i.ID, "kind": i.Kind, "reason": i.Reason})
+	about := map[string]any{"intention_id": i.ID, "kind": i.Kind, "reason": i.Reason}
+	// A picture goes with it: the face she is asking about.
+	if i.ImageID != 0 {
+		about["image_id"] = i.ImageID
+		about["subject"] = i.Subject
+	}
+	meta, _ := json.Marshal(about)
 	// It joins the session in progress if there is a warm one, otherwise
 	// it opens a session of her own.
 	sess, ok := b.CurrentSession()
@@ -322,10 +332,10 @@ func (b *Brain) deliver(ctx context.Context, cfg config.Config, i store.Intentio
 	if err != nil {
 		return err
 	}
-	// A follow-up stays "sent" until it is answered or it expires. The
-	// other kinds are finished once said.
+	// A follow-up, or a face she asked about, stays "sent" until it is
+	// answered or it expires. The other kinds are finished once said.
 	status := "done"
-	if i.Kind == "followup" {
+	if i.Kind == "followup" || i.Kind == "face" {
 		status = "sent"
 	}
 	b.S.SetIntentionStatus(i.ID, "sent", now)

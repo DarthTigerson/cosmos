@@ -123,7 +123,12 @@ func main() {
 	defer speaker.Stop()
 	hearing := &voice.Hearing{}
 	defer hearing.Stop()
-	srv := &http.Server{Handler: (&api.Server{B: b, Token: token, Launch: launch, ModelDirs: modelDirs, Voice: speaker, Hearing: hearing}).Handler()}
+	// Faces and voices are printed by a helper in her voice's Python
+	// environment; the pictures she keeps go in the data folder.
+	senses := voice.DefaultSenses(speaker.Dir)
+	defer senses.Stop()
+	b.Senses, b.SightDir = senses, filepath.Join(*data, "sight")
+	srv := &http.Server{Handler: (&api.Server{B: b, Token: token, Launch: launch, ModelDirs: modelDirs, Voice: speaker, Hearing: hearing, Senses: senses}).Handler()}
 	fmt.Printf("listening on http://%s\n", ln.Addr())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

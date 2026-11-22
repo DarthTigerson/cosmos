@@ -2206,3 +2206,73 @@ func TestNothingIsOverheardWhenTheRoomIsOff(t *testing.T) {
 		t.Error("with the room off nothing is kept")
 	}
 }
+
+func TestAPictureReachesTheWriterOnlyWhenTheModelCanSee(t *testing.T) {
+	r := newRig(t)
+	var got llm.Request
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		got = q
+		return "What a lovely boy.", nil
+	}
+	pic := "data:image/jpeg;base64,AAAA"
+	ctx := WithSaid(context.Background(), Said{Seen: pic})
+	if _, err := r.b.HandleMessage(ctx, "look at my boy"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	last := got.Messages[len(got.Messages)-1]
+	if len(last.Images) != 0 {
+		t.Error("a model with no projector must not be sent a picture")
+	}
+	if !strings.Contains(last.Content, "cannot make out pictures") {
+		t.Errorf("she should be told she cannot see yet:\n%s", last.Content)
+	}
+
+	c := r.b.Cfg.Get()
+	c.MainSees = true
+	r.b.Cfg.Set(c)
+	if _, err := r.b.HandleMessage(ctx, "look at my boy again"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	last = got.Messages[len(got.Messages)-1]
+	if len(last.Images) != 1 || last.Images[0] != pic {
+		t.Fatalf("the picture should go with the newest message, got %v", last.Images)
+	}
+	evs, _ := r.b.S.EventsBetween(r.now.Add(-time.Hour), r.now.Add(time.Hour))
+	for _, e := range evs {
+		if strings.Contains(e.Text, "base64") || strings.Contains(string(e.Meta), "base64") {
+			t.Errorf("the picture was stored in a %s event", e.Kind)
+		}
+	}
+}
+
+// Tools that reach outside (web search, weather, connected servers) are
+// planned by route and run before the writer. A picture goes to the
+// writer only, so nothing from the camera can end up in what they send.
+func TestAPictureNeverReachesThePlanOrTheTools(t *testing.T) {
+	r := newRig(t)
+	c := r.b.Cfg.Get()
+	c.MainSees = true
+	r.b.Cfg.Set(c)
+	pic := "data:image/jpeg;base64,SECRETPIXELS"
+	r.fake.Handlers["writer"] = func(llm.Request) (string, error) { return "I see him.", nil }
+	ctx := WithSaid(context.Background(), Said{Seen: pic})
+	if _, err := r.b.HandleMessage(ctx, "look who this is and search the web for him"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	for _, q := range r.fake.Calls {
+		if q.Role == "writer" {
+			continue
+		}
+		for _, m := range q.Messages {
+			if len(m.Images) > 0 || strings.Contains(m.Content, "SECRETPIXELS") {
+				t.Errorf("the picture reached the %s step", q.Role)
+			}
+		}
+		if strings.Contains(q.System, "SECRETPIXELS") {
+			t.Errorf("the picture reached the %s step's instructions", q.Role)
+		}
+	}
+}

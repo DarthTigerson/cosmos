@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, useLoad, useSignals } from '../api'
 import { closenessWord, isZero, when } from '../format'
+import { FaceAsk, Faces } from '../faces'
 import { Empty, Problem, Screen } from '../parts'
-import type { Person, PersonDetail } from '../types'
+import type { Person, PersonDetail, UnknownGroup } from '../types'
 import { Row } from './Memory'
 
 // The groups the list is sorted into, in order, by relationship word.
@@ -33,6 +34,8 @@ function Avatar({ p, size }: { p: Pick<Person, 'name' | 'relationship'>; size?: 
 
 export function People() {
   const { data, error, reload } = useLoad<Person[]>('/api/people')
+  const { data: strangers, reload: reloadStrangers } = useLoad<UnknownGroup[]>('/api/faces/unknown')
+  const { data: you } = useLoad<{ user: string }>('/api/state')
   // #people/12 opens that person, as linked from a memory.
   const [picked, setPicked] = useState<number | null>(() => Number(location.hash.split('/')[1]) || null)
   const [mode, setMode] = useState<'edit' | 'merge' | 'forget' | null>(null)
@@ -40,7 +43,10 @@ export function People() {
   const [problem, setProblem] = useState('')
   const [toast, setToast] = useState('')
   useSignals((s) => {
-    if (s.kind === 'message' || s.kind === 'state' || s.kind === 'people') reload()
+    if (s.kind === 'message' || s.kind === 'state' || s.kind === 'people') {
+      reload()
+      reloadStrangers()
+    }
   })
   // Open the closest person by default, and recover if the picked one goes.
   useEffect(() => {
@@ -115,6 +121,31 @@ export function People() {
                         same as…
                       </button>
                     </div>
+                  </div>
+                ))}
+              </section>
+            )}
+            {(strangers ?? []).length > 0 && !q && (
+              <section className="who-card" aria-label="Faces she does not know yet">
+                <div className="who-head">
+                  <h2 className="label">Seen, not known</h2>
+                  <span className="sub">{strangers!.length} to answer</span>
+                </div>
+                {strangers!.slice(0, 3).map((g) => (
+                  <div key={g.id} className="who-item">
+                    <span className="who-heard">
+                      seen {g.seen === 1 ? 'once' : `${g.seen} times`}, last {when(g.last)}
+                    </span>
+                    <FaceAsk
+                      subject={`faces:${g.id}`}
+                      image={g.cover}
+                      user={you?.user ?? 'you'}
+                      onDone={(said) => {
+                        setToast(said)
+                        reload()
+                        window.setTimeout(reloadStrangers, 1200)
+                      }}
+                    />
                   </div>
                 ))}
               </section>
@@ -271,6 +302,12 @@ function Detail({ id, people, mode, setMode, pick, send, onProblem, onToast }: D
           </div>
         )}
 
+        <Faces
+          faces={data.faces ?? []}
+          name={p.name}
+          onForget={(id) => memory(`/api/faces/${id}`, 'DELETE', undefined, 'That picture is deleted.')}
+        />
+        {data.voice && <p className="muted face-voice">She knows {p.name}'s voice.</p>}
         <dl className="person-facts">
           <div>
             <dt className="label">Closeness</dt>

@@ -87,6 +87,25 @@ type Config struct {
 	// RoomMinutes is how long what she overhears is kept, in memory
 	// only, for the reply she is next asked for. 0 keeps nothing.
 	RoomMinutes int `json:"room_minutes"`
+	// MainSees marks a main model server started elsewhere as able to
+	// look at pictures. One the core starts sees when it has a projector.
+	MainSees bool `json:"main_sees"`
+	// How alike two prints must be. A face at FaceSure or more is that
+	// person; at FaceMaybe she thinks so and asks; strangers at FaceSame
+	// are taken to be one person. A voice at VoiceSure is that person's.
+	FaceSure  float64 `json:"face_sure"`
+	FaceMaybe float64 `json:"face_maybe"`
+	FaceSame  float64 `json:"face_same"`
+	VoiceSure float64 `json:"voice_sure"`
+	// UnknownFaceDays is how long pictures of strangers are kept unasked
+	// or unanswered.
+	UnknownFaceDays int `json:"unknown_face_days"`
+	// RememberFaces: faces the camera follows are kept and matched to
+	// people. Off, she still looks but keeps nothing.
+	RememberFaces bool `json:"remember_faces"`
+	// AnswerOthers: when someone other than the user says her name, she
+	// answers. Off, she listens and keeps it as what was said nearby.
+	AnswerOthers bool `json:"answer_others"`
 	// MCPServers are the user's own tool servers she may use.
 	MCPServers []mcp.Server `json:"mcp_servers"`
 }
@@ -114,6 +133,12 @@ func Default() Config {
 		HearLanguage:     "en",
 		ListenWindow:     25,
 		RoomMinutes:      3,
+		FaceSure:         0.45,
+		FaceMaybe:        0.32,
+		FaceSame:         0.40,
+		VoiceSure:        0.62,
+		UnknownFaceDays:  14,
+		RememberFaces:    true,
 	}
 }
 
@@ -134,6 +159,12 @@ func (c Config) Tier(name string) Endpoint {
 		return c.Embed
 	}
 	return c.Main
+}
+
+// Sees says whether the main model can look at pictures: it is started
+// with a vision projector, or the user says the server they run has one.
+func (c Config) Sees() bool {
+	return c.MainSees || (c.Main.Launch != nil && c.Main.Launch.MMProj != "")
 }
 
 // Holder keeps the live config and saves changes to disk.

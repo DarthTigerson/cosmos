@@ -32,6 +32,10 @@ type Said struct {
 	// Room is what was being said nearby just before, by anyone. It is
 	// for this reply only and is never stored.
 	Room string
+	// Seen is a picture from her camera taken as the message was said,
+	// as a data: URI. Only the model on this computer sees it; it is not
+	// stored with the message.
+	Seen string
 }
 
 type saidKey struct{}
@@ -879,6 +883,9 @@ func (b *Brain) compose(ctx context.Context, t *trace, cfg config.Config, mood M
 	} else {
 		msgs = append(msgs, llm.Message{Role: "user", Content: ask})
 	}
+	if seen := saidOf(ctx).Seen; seen != "" && cfg.Sees() {
+		msgs[len(msgs)-1].Images = []string{seen}
+	}
 
 	feedback := ""
 	draft := ""
@@ -1480,6 +1487,27 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	}
 	if urgent(text, recent) {
 		moment = strings.TrimSpace(moment + "\n" + cfg.UserName + " is in the middle of something serious and has no time. Be brief and practical. No sympathy speeches and no questions about how they feel. When they ask you to think it through, give the concrete options and the cost of each. If you are not sure whether something technical is safe, say you are not sure and offer to look it up. Never guess about something that could lose data or hurt someone.")
+	}
+	// Who her camera has seen in the last minute, besides the user.
+	if view := b.InView(time.Minute); len(view) > 0 {
+		names := []string{}
+		for _, id := range view {
+			if n := b.personName(id); n != "" {
+				names = append(names, n)
+			}
+		}
+		if len(names) > 0 {
+			moment = strings.TrimSpace(moment + "\nThrough your camera you can see " + strings.Join(names, " and ") + " with " + cfg.UserName + " right now.")
+		}
+	}
+	if saidOf(ctx).Seen != "" {
+		if cfg.Sees() {
+			moment = strings.TrimSpace(moment + "\nThe picture with this message is what your camera sees right now. Say what you see in it only as far as it bears on what " + cfg.UserName + " said.")
+		} else {
+			// The camera is on, but the model was started without the part
+			// that reads pictures. She must not pretend.
+			moment = strings.TrimSpace(moment + "\nYour camera is on, but you cannot make out pictures yet: you see that someone is there, not what they are showing you. If they want you to look at something, say so plainly.")
+		}
 	}
 	if said := saidOf(ctx); said.Aloud {
 		moment = strings.TrimSpace(moment + "\n" + cfg.UserName + " said this out loud and will hear your reply spoken, not read it. Talk the way you would across a room: two or three short sentences, nothing that only works on a screen. No lists, headings or symbols. Say numbers and times the way they are spoken. If you give a web address, put it alone on the last line and say it is in the chat.")

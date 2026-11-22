@@ -78,6 +78,33 @@ starts. Cutting in stops her only once it is clearly someone speaking
 while she is working are never dropped, and cut her current reply short
 so she answers everything together.
 
+**Faces and voices.** With her camera on, a face she follows for a moment
+is lined up in the camera worker and turned into a faceprint; a crop is
+kept in `sight/` in her data folder. A face she knows is a sighting of that
+person (once per ten minutes). One she does not know joins others like it,
+and after she sleeps she asks "Who is this?" in the chat with the picture:
+name them, pick someone she knows, say it is you, or have her forget them,
+which deletes the pictures. Strangers' pictures are let go after
+`unknown_face_days`. The People page shows each person's pictures and the
+faces still to answer. Teach her your voice and her own in Settings → Her
+ears. She then ignores her own voice from the speakers and, listening for
+her name, answers only you (unless "Answer others" is on). A voice she does
+not know, heard while one person she knows is in view, becomes theirs.
+Camera, pictures and prints never leave this computer.
+
+Two model files, downloaded once, plus `sherpa-onnx` in her voice's
+environment:
+
+```bash
+mkdir -p ~/models/sight ~/models/speaker
+curl -L -o ~/models/sight/w600k_mbf.onnx https://huggingface.co/deepghs/insightface/resolve/main/buffalo_s/w600k_mbf.onnx
+curl -L -o ~/models/speaker/wespeaker_en_voxceleb_resnet34_LM.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx
+uv pip install --python "$HOME/Library/Application Support/Cosmos/voice/.venv/bin/python" sherpa-onnx
+```
+
+For her to describe what she sees when you ask her to look, pick the main
+model's "Vision projector" in Models and restart it.
+
 **Sessions.** A session is one sitting. Her memories, people, mood and
 intentions carry across all of them; only the thread starts clean. A new
 one starts when you pick "New session", after two hours of silence, or

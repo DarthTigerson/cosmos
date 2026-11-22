@@ -97,7 +97,7 @@ func Open(path string) (*Store, error) {
 	}
 	// One connection keeps writes ordered and makes :memory: behave.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + sightSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -113,6 +113,8 @@ func Open(path string) (*Store, error) {
 		{"episodes", "thoughts TEXT NOT NULL DEFAULT '[]'"},
 		{"people", "locked TEXT NOT NULL DEFAULT '[]'"},
 		{"people", "forgotten INTEGER NOT NULL DEFAULT 0"},
+		{"intentions", "image_id INTEGER NOT NULL DEFAULT 0"},
+		{"intentions", "subject TEXT NOT NULL DEFAULT ''"},
 	} {
 		name, _, _ := strings.Cut(add[1], " ")
 		var n int
@@ -796,6 +798,11 @@ type Intention struct {
 	CreatedAt  time.Time `json:"created_at"`
 	SentAt     time.Time `json:"sent_at"`
 	Answered   bool      `json:"answered"`
+	// ImageID is a picture that goes with it ("who is this?"), or 0.
+	ImageID int64 `json:"image_id,omitempty"`
+	// Subject says what answering it settles, as "faces:<group>" or
+	// "maybe:<face>"; empty for most.
+	Subject string `json:"subject,omitempty"`
 }
 
 func (s *Store) AddIntention(i Intention) (Intention, error) {
@@ -803,8 +810,8 @@ func (s *Store) AddIntention(i Intention) (Intention, error) {
 		i.Importance = 2
 	}
 	i.Status = "open"
-	res, err := s.db.Exec(`INSERT INTO intentions(kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-		i.Kind, i.Text, i.Reason, i.Facts, ms(i.TriggerAt), ms(i.ExpiresAt), i.Importance, i.Status, ms(i.CreatedAt))
+	res, err := s.db.Exec(`INSERT INTO intentions(kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at,image_id,subject) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		i.Kind, i.Text, i.Reason, i.Facts, ms(i.TriggerAt), ms(i.ExpiresAt), i.Importance, i.Status, ms(i.CreatedAt), i.ImageID, i.Subject)
 	if err != nil {
 		return i, err
 	}
@@ -814,7 +821,7 @@ func (s *Store) AddIntention(i Intention) (Intention, error) {
 
 // Intentions lists intentions in the given statuses, soonest trigger first.
 func (s *Store) Intentions(statuses ...string) ([]Intention, error) {
-	q := `SELECT id,kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at,sent_at,answered FROM intentions`
+	q := `SELECT id,kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at,sent_at,answered,image_id,subject FROM intentions`
 	args := []any{}
 	if len(statuses) > 0 {
 		q += ` WHERE status IN (?` + strings.Repeat(",?", len(statuses)-1) + `)`
@@ -831,7 +838,7 @@ func (s *Store) Intentions(statuses ...string) ([]Intention, error) {
 	for rows.Next() {
 		var i Intention
 		var t, e, c, sent int64
-		if err := rows.Scan(&i.ID, &i.Kind, &i.Text, &i.Reason, &i.Facts, &t, &e, &i.Importance, &i.Status, &c, &sent, &i.Answered); err != nil {
+		if err := rows.Scan(&i.ID, &i.Kind, &i.Text, &i.Reason, &i.Facts, &t, &e, &i.Importance, &i.Status, &c, &sent, &i.Answered, &i.ImageID, &i.Subject); err != nil {
 			return nil, err
 		}
 		i.TriggerAt, i.ExpiresAt, i.CreatedAt, i.SentAt = fromMs(t), fromMs(e), fromMs(c), fromMs(sent)

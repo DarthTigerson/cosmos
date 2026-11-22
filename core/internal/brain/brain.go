@@ -58,6 +58,12 @@ type Brain struct {
 	cancelTurn context.CancelFunc
 	// What was overheard while listening for her name; memory only.
 	room room
+
+	// Senses turns faces and voices into prints; nil when not set up.
+	Senses Printer
+	// SightDir is where the pictures she keeps are written.
+	SightDir string
+	view     inView
 }
 
 // lockForMessage takes the model for a message, ahead of background work.

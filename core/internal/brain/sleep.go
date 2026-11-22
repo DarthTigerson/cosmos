@@ -121,6 +121,9 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 		}
 	}
 	finish := func() {
+		// Faces she saw and does not know become questions for the
+		// morning; pictures of strangers kept too long are let go.
+		b.faceQuestions(now)
 		// What she has slept on leaves the list of open sessions.
 		b.closeSessions(ctx, now)
 		b.S.Set("last_sleep_at", now.Format(time.RFC3339))

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, useLoad } from '../api'
+import { api, apiRecording, useLoad } from '../api'
+import { startMicRecording } from '../avatar/mic'
 import { Problem, Screen, Switch } from '../parts'
-import type { Config, Voice } from '../types'
+import type { Config, Senses, Voice } from '../types'
 import { type Connection, Connections, type ConnectionSwitches } from './Connections'
 import { VoicePicker } from './VoicePicker'
 
@@ -11,6 +12,7 @@ const sections = [
   ['thinks', 'How she thinks'],
   ['may', 'What she may do'],
   ['ears', 'Her ears'],
+  ['eyes', 'Her eyes'],
   ['voice', 'Her voice'],
 ] as const
 type Section = (typeof sections)[number][0]
@@ -21,7 +23,8 @@ const fields: Record<Exclude<Section, 'voice'>, (keyof Config)[]> = {
   day: ['quiet_from', 'quiet_to', 'brief_hour', 'sleep_hour', 'initiative_budget', 'cooldown_minutes'],
   thinks: ['planning', 'verify_with_model', 'verify_claims'],
   may: ['web_search', 'podcasts', 'weather_watch'],
-  ears: ['name_sounds_like', 'listen_window', 'room_minutes', 'hear_language'],
+  ears: ['name_sounds_like', 'listen_window', 'room_minutes', 'hear_language', 'answer_others'],
+  eyes: ['remember_faces', 'unknown_face_days'],
 }
 
 const plans: { value: Config['planning']; title: string; help: string }[] = [
@@ -390,6 +393,34 @@ export function Settings({ onSaved }: { onSaved: () => void }) {
                   </Field>
                 </div>
                 <p className="note">Spellings: her name is matched by sound, so close mishearings of “{cfg.companion_name}” already count. Add one here only if she keeps missing it. Set the kept minutes to 0 to keep nothing.</p>
+                <KnownVoices user={cfg.user_name} name={cfg.companion_name} />
+                <SwitchRow
+                  title={`Answer others who say “${cfg.companion_name}”`}
+                  why={`Off, she answers only ${cfg.user_name}'s voice; what others say to her is kept as talk nearby. Needs your voice taught to her above.`}
+                  checked={cfg.answer_others}
+                  onChange={(on) => set({ answer_others: on })}
+                />
+              </section>
+
+              <section className="set-section" data-section="eyes">
+                <header>
+                  <h2>Her eyes</h2>
+                  <p>
+                    With her camera on, she remembers the faces she follows for a moment and learns who they are. Someone she does not know, she asks you about after she sleeps, with their picture. Pictures and faceprints are kept in her data folder on this computer and never sent anywhere.
+                  </p>
+                </header>
+                <SwitchRow
+                  title="Remember faces"
+                  why="Off, she still looks at you and follows movement, but keeps no pictures."
+                  checked={cfg.remember_faces}
+                  onChange={(on) => set({ remember_faces: on })}
+                />
+                <div className="set-grid">
+                  <Field id="unknown-days" label="Days to keep strangers' pictures unanswered">
+                    <input id="unknown-days" type="number" min={1} max={365} value={cfg.unknown_face_days} onChange={(e) => set({ unknown_face_days: Math.max(1, Number(e.target.value)) })} />
+                  </Field>
+                </div>
+                <SensesNote />
               </section>
 
               <section className="set-section" data-section="voice">
@@ -441,5 +472,92 @@ export function Settings({ onSaved }: { onSaved: () => void }) {
         </div>
       )}
     </Screen>
+  )
+}
+
+// What she needs to recognise faces and voices, when something is missing.
+function SensesNote() {
+  const { data } = useLoad<Senses>('/api/senses')
+  if (!data || (data.faces && data.voices)) return null
+  return (
+    <p className="note">
+      Not set up yet: {data.missing.join('; ')}. See “Faces and voices” in the README for the two model files. They are downloaded once and run on this computer.
+    </p>
+  )
+}
+
+// The lines read aloud to teach her a voice: varied sounds, about fifteen
+// seconds.
+const reading =
+  'The quick brown fox jumps over the lazy dog. On Sunday mornings I like a slow coffee by the window, watching the boats come in. Six thick thistle sticks, and a box of mixed biscuits.'
+
+// KnownVoices teaches her the user's voice and her own, so the name gate
+// answers only the user and she never answers herself.
+function KnownVoices({ user, name }: { user: string; name: string }) {
+  const { data, reload } = useLoad<Senses>('/api/senses')
+  const [recording, setRecording] = useState<{ stop: () => Promise<ArrayBuffer> } | null>(null)
+  const [busy, setBusy] = useState('')
+  const [problem, setProblem] = useState('')
+  if (!data?.voices) return null
+
+  const learn = (owner: 'user' | 'her', wav: ArrayBuffer) =>
+    apiRecording(`/api/voiceprints/${owner}`, wav)
+      .then(() => setProblem(''))
+      .catch((e: Error) => setProblem(e.message))
+      .finally(() => {
+        setBusy('')
+        reload()
+      })
+  const start = async () => {
+    try {
+      setRecording(await startMicRecording())
+    } catch (e) {
+      setProblem(`The microphone would not open: ${(e as Error).message}`)
+    }
+  }
+  const finish = async () => {
+    if (!recording) return
+    setBusy('Learning your voice…')
+    const wav = await recording.stop()
+    setRecording(null)
+    await learn('user', wav)
+  }
+  const hers = () => {
+    setBusy(`Learning ${name}'s voice…`)
+    void learn('her', new ArrayBuffer(0))
+  }
+
+  return (
+    <div className="known-voices">
+      <div className="set-switch">
+        <div>
+          <b>{user}'s voice</b>
+          <span>
+            {data.knows_you ? 'She knows your voice.' : 'Not taught yet.'} {recording ? 'Read this aloud, then press Done:' : 'Read a few lines so she can tell you from others.'}
+          </span>
+          {recording && <q className="reading">{reading}</q>}
+        </div>
+        {recording ? (
+          <button type="button" onClick={() => void finish()}>
+            Done
+          </button>
+        ) : (
+          <button type="button" className="secondary" disabled={!!busy} onClick={() => void start()}>
+            {data.knows_you ? 'Teach again' : 'Teach her'}
+          </button>
+        )}
+      </div>
+      <div className="set-switch">
+        <div>
+          <b>{name}'s own voice</b>
+          <span>{data.knows_her ? 'She knows her own voice, so she does not answer herself.' : 'So she does not mistake her voice from the speakers for someone talking.'}</span>
+        </div>
+        <button type="button" className="secondary" disabled={!!busy || !!recording} onClick={hers}>
+          {data.knows_her ? 'Learn again' : 'Learn it'}
+        </button>
+      </div>
+      {busy && <p className="note">{busy}</p>}
+      <Problem message={problem} />
+    </div>
   )
 }

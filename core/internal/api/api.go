@@ -39,6 +39,8 @@ type Server struct {
 	// Hearing writes out what the user says. Nil uses whisper-cli, which
 	// loads the model for every clip.
 	Hearing *voice.Hearing
+	// Senses turns faces and voices into prints; nil when not set up.
+	Senses *voice.Senses
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -95,6 +97,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/hear/ready", s.auth(s.hearReady))
 	mux.HandleFunc("POST /api/overheard", s.auth(s.overheard))
 	mux.HandleFunc("DELETE /api/overheard", s.auth(s.forgetOverheard))
+	mux.HandleFunc("GET /api/senses", s.auth(s.senses))
+	mux.HandleFunc("POST /api/see", s.auth(s.see))
+	mux.HandleFunc("GET /api/images/{id}", s.auth(s.image))
+	mux.HandleFunc("GET /api/faces/unknown", s.auth(s.unknownFaces))
+	mux.HandleFunc("POST /api/faces/groups/{id}", s.auth(s.answerFaces))
+	mux.HandleFunc("POST /api/faces/maybe/{id}", s.auth(s.answerMaybe))
+	mux.HandleFunc("GET /api/faces/{id}", s.auth(s.getFace))
+	mux.HandleFunc("DELETE /api/faces/{id}", s.auth(s.forgetFace))
+	mux.HandleFunc("GET /api/people/{id}/faces", s.auth(s.personFaces))
+	mux.HandleFunc("POST /api/voiceprints/{owner}", s.auth(s.learnVoice))
+	mux.HandleFunc("DELETE /api/voiceprints/{owner}", s.auth(s.forgetVoice))
 	mux.HandleFunc("GET /api/voices", s.auth(s.voices))
 	mux.HandleFunc("PUT /api/voices", s.auth(s.setVoice))
 	mux.HandleFunc("POST /api/messages/{id}/feedback", s.auth(s.feedback))
@@ -249,16 +262,26 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 		// Spoken: said aloud rather than typed.
 		Spoken bool `json:"spoken"`
+		// Seen: a picture from her camera, as a data: URI.
+		Seen string `json:"seen"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
 		fail(w, 400, "send {\"text\": \"...\"}")
 		return
 	}
 	// The turn finishes even if the window closes mid-reply, so her
 	// stream never holds a question without its answer.
 	ctx := context.WithoutCancel(r.Context())
-	if in.Spoken {
-		ctx = brain.WithSaid(ctx, brain.Said{Aloud: true, Room: s.B.Room()})
+	if in.Seen != "" && !strings.HasPrefix(in.Seen, "data:image/") {
+		fail(w, 400, "seen must be a data:image/ address")
+		return
+	}
+	if in.Spoken || in.Seen != "" {
+		said := brain.Said{Aloud: in.Spoken, Seen: in.Seen}
+		if in.Spoken {
+			said.Room = s.B.Room()
+		}
+		ctx = brain.WithSaid(ctx, said)
 	}
 	reply, err := s.B.HandleMessage(ctx, in.Text)
 	if errors.Is(err, brain.ErrInterrupted) {
@@ -814,6 +837,16 @@ func (s *Server) setVoice(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	// A new voice is a new voiceprint for her, or she would take her own
+	// words for someone else's.
+	if s.B.KnowsVoice("her") {
+		go func() {
+			ctx := context.Background()
+			if wav, err := s.herSample(ctx); err == nil {
+				s.B.LearnVoice(ctx, "her", wav)
+			}
+		}()
+	}
 	s.voices(w, r)
 }
 
@@ -829,6 +862,13 @@ func (s *Server) hear(w http.ResponseWriter, r *http.Request) {
 	cfg := s.B.Cfg.Get()
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
+	// Whose voice it is, worked out while the words are.
+	spoke := make(chan brain.Speaker, 1)
+	go func() { spoke <- s.B.WhoSpoke(ctx, wav) }()
+	writeJSON := func(w http.ResponseWriter, status int, view map[string]any) {
+		view["speaker"] = <-spoke
+		writeJSON(w, status, view)
+	}
 	if s.Hearing != nil && s.Hearing.Missing(cfg.HearModel) == "" {
 		text, err := s.Hearing.Hear(ctx, wav, cfg.HearModel, cfg.HearLanguage, hearingPrompt(cfg))
 		if err == nil {
@@ -871,6 +911,7 @@ func heardView(cfg config.Config, text string) map[string]any {
 		"addressed": voice.Addressed(text, cfg.CompanionName, cfg.NameSoundsLike),
 		"ending":    voice.Ending(text),
 		"window":    cfg.ListenWindow,
+		"others":    cfg.AnswerOthers,
 	}
 }
 
@@ -1356,4 +1397,185 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// ---------- what she sees, and voices ----------
+
+// senses says which of her senses are set up and whose voices she knows.
+func (s *Server) senses(w http.ResponseWriter, r *http.Request) {
+	view := map[string]any{"faces": false, "voices": false, "missing": []string{"the senses helper is not set up"}}
+	if s.Senses != nil {
+		view = map[string]any{"faces": s.Senses.CanSeeFaces(), "voices": s.Senses.CanHearVoices(), "missing": s.Senses.Missing()}
+	}
+	view["knows_you"] = s.B.KnowsVoice("user")
+	view["knows_her"] = s.B.KnowsVoice("her")
+	view["unknown"] = len(s.B.UnknownGroups())
+	writeJSON(w, 200, view)
+}
+
+// see takes a face the camera followed: a picture to keep (JPEG) and the
+// same face lined up at 112 by 112 for its print.
+func (s *Server) see(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		JPEG    string  `json:"jpeg"`
+		RGB     string  `json:"rgb"`
+		Seconds float64 `json:"seconds"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&in) != nil {
+		fail(w, 400, "send {jpeg, rgb, seconds}")
+		return
+	}
+	jpeg, err1 := base64.StdEncoding.DecodeString(strings.TrimPrefix(in.JPEG, "data:image/jpeg;base64,"))
+	rgb, err2 := base64.StdEncoding.DecodeString(in.RGB)
+	if err1 != nil || err2 != nil || len(rgb) != 112*112*3 || len(jpeg) < 100 {
+		fail(w, 400, "the face pictures were not readable")
+		return
+	}
+	seen, err := s.B.See(r.Context(), jpeg, rgb, in.Seconds)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, seen)
+}
+
+func (s *Server) image(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	img, ok := s.B.S.GetImage(id)
+	if !ok {
+		fail(w, 404, "no such picture")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Type", "image/jpeg")
+	http.ServeFile(w, r, img.Path)
+}
+
+func (s *Server) unknownFaces(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.B.UnknownGroups())
+}
+
+func (s *Server) answerFaces(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	var in brain.FaceAnswer
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in) != nil {
+		fail(w, 400, "say who it is")
+		return
+	}
+	who, err := s.B.AnswerFaces(id, in)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"who": who})
+}
+
+func (s *Server) answerMaybe(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	var in struct {
+		Yes bool `json:"yes"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in) != nil {
+		fail(w, 400, "send {yes}")
+		return
+	}
+	if err := s.B.AnswerMaybe(id, in.Yes); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) getFace(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	f, ok := s.B.S.GetFace(id)
+	if !ok {
+		fail(w, 404, "no such face")
+		return
+	}
+	writeJSON(w, 200, f)
+}
+
+func (s *Server) forgetFace(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.ForgetFace(id); err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// personFaces lists the pictures of someone; "me" is the user.
+func (s *Server) personFaces(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if r.PathValue("id") == "me" {
+		id, ok = brain.UserID, true
+	}
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	faces, err := s.B.S.FacesOf(id)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, faces)
+}
+
+// learnVoice keeps a voiceprint from a recording: "user" is the user
+// reading a few lines, "her" is her own voice as it comes from the
+// speakers.
+func (s *Server) learnVoice(w http.ResponseWriter, r *http.Request) {
+	owner := r.PathValue("owner")
+	if owner != "user" && owner != "her" {
+		fail(w, 400, "a voiceprint is the user's or hers")
+		return
+	}
+	wav, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if owner == "her" && err == nil && len(wav) == 0 {
+		// Her own voice is made here: a few lines in the voice she has now.
+		wav, err = s.herSample(r.Context())
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+	}
+	if err != nil || len(wav) < 1000 {
+		fail(w, 400, "the recording was empty or too long")
+		return
+	}
+	if err := s.B.LearnVoice(r.Context(), owner, wav); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) forgetVoice(w http.ResponseWriter, r *http.Request) {
+	owner := r.PathValue("owner")
+	if owner != "user" && owner != "her" {
+		fail(w, 400, "a voiceprint is the user's or hers")
+		return
+	}
+	s.B.S.ForgetVoice(owner, 0)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// herSample is her voice saying a few lines, for her own voiceprint, so
+// she can tell her voice coming back through the speakers from someone
+// talking.
+func (s *Server) herSample(ctx context.Context) ([]byte, error) {
+	if s.Voice == nil || s.Voice.Missing() != "" {
+		return nil, errors.New("her voice is not set up")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	cfg := s.B.Cfg.Get()
+	line := "Hello, it is " + cfg.CompanionName + ". I was just thinking about what we talked about this morning, and I wanted to ask you something about it when you have a moment."
+	spoken, err := s.Voice.Speak(ctx, line, cfg.Voice, 1)
+	if err != nil {
+		return nil, err
+	}
+	return base64.StdEncoding.DecodeString(spoken.Audio)
 }

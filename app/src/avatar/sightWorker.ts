@@ -122,6 +122,108 @@ async function faceFinder(urls: { loader: string; wasm: string; model: string })
   )
 }
 
+// ---------- remembering faces ----------
+
+// Where the eyes, nose and mouth corners sit in the 112 by 112 face the
+// face model was taught on (the ArcFace layout), left to right as seen.
+const TEMPLATE = [
+  [38.2946, 51.6963],
+  [73.5318, 51.5014],
+  [56.0252, 71.7366],
+  [41.5493, 92.3655],
+  [70.7299, 92.2041],
+]
+// A face is remembered once it has been in view this long, again a bit
+// later, then now and then while it stays.
+const FACE_FIRST_MS = 1500
+const FACE_SECOND_MS = 8000
+const FACE_EVERY_MS = 30000
+
+type Point = { x: number; y: number }
+let facePoints: Point[] | null = null
+let faceSince = -1
+let faceSent = 0
+
+const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+
+// The five points, from the face finder's 478: the eye on the left of the
+// picture, the other eye, the nose tip, and the mouth's corners.
+function fivePoints(points: Point[]): Point[] {
+  return [mid(points[33], points[133]), mid(points[362], points[263]), points[4], points[61], points[291]]
+}
+
+// The turn, scale and shift that best lays the points over the template
+// (least squares, no mirroring): x' = a x - b y + tx, y' = b x + a y + ty.
+function lineUp(src: Point[]): [number, number, number, number] {
+  const n = src.length
+  let sx = 0, sy = 0, dx = 0, dy = 0
+  for (let i = 0; i < n; i++) {
+    sx += src[i].x; sy += src[i].y; dx += TEMPLATE[i][0]; dy += TEMPLATE[i][1]
+  }
+  sx /= n; sy /= n; dx /= n; dy /= n
+  let num = 0, cross = 0, den = 0
+  for (let i = 0; i < n; i++) {
+    const x = src[i].x - sx, y = src[i].y - sy
+    const u = TEMPLATE[i][0] - dx, v = TEMPLATE[i][1] - dy
+    num += x * u + y * v
+    cross += x * v - y * u
+    den += x * x + y * y
+  }
+  const a = num / den
+  const b = cross / den
+  return [a, b, dx - (a * sx - b * sy), dy - (b * sx + a * sy)]
+}
+
+function base64(bytes: Uint8Array): string {
+  let s = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(s)
+}
+
+const lined = new OffscreenCanvas(112, 112)
+const linedPen = lined.getContext('2d', { willReadFrequently: true })!
+
+// The face in a full-size picture: lined up for its print, and a square
+// crop around it to keep and show.
+async function faceFrom(picture: ImageBitmap): Promise<{ jpeg: string; rgb: string } | null> {
+  if (!facePoints) return null
+  const w = picture.width
+  const h = picture.height
+  const px = facePoints.map((p) => ({ x: p.x * w, y: p.y * h }))
+  const [a, b, tx, ty] = lineUp(fivePoints(px))
+  linedPen.setTransform(1, 0, 0, 1, 0, 0)
+  linedPen.fillStyle = '#000'
+  linedPen.fillRect(0, 0, 112, 112)
+  linedPen.setTransform(a, b, -b, a, tx, ty)
+  linedPen.drawImage(picture, 0, 0)
+  const rgba = linedPen.getImageData(0, 0, 112, 112).data
+  const rgb = new Uint8Array(112 * 112 * 3)
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2]
+  }
+
+  let minX = w, maxX = 0, minY = h, maxY = 0
+  for (const p of px) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y)
+  }
+  // Room around the face, so a person is recognisable to the user too.
+  const side = Math.min(w, h, Math.max(maxX - minX, maxY - minY) * 1.8)
+  const cx = Math.max(side / 2, Math.min(w - side / 2, (minX + maxX) / 2))
+  const cy = Math.max(side / 2, Math.min(h - side / 2, (minY + maxY) / 2))
+  const crop = new OffscreenCanvas(224, 224)
+  crop.getContext('2d')!.drawImage(picture, cx - side / 2, cy - side / 2, side, side, 0, 0, 224, 224)
+  const blob = await crop.convertToBlob({ type: 'image/jpeg', quality: 0.85 })
+  return { jpeg: base64(new Uint8Array(await blob.arrayBuffer())), rgb: base64(rgb) }
+}
+
+// Whether a face has been in view, turned to her, long enough to remember.
+function wantsFace(t: number, frontal: boolean): boolean {
+  if (!facePoints || !frontal || faceSince < 0) return false
+  const held = t - faceSince
+  const next = faceSent === 0 ? FACE_FIRST_MS : faceSent === 1 ? FACE_SECOND_MS : FACE_SECOND_MS + (faceSent - 1) * FACE_EVERY_MS
+  return held >= next
+}
+
 let landmarker: FaceLandmarker | null = null
 const small = new OffscreenCanvas(MW, MH)
 const pen = small.getContext('2d', { willReadFrequently: true })!
@@ -159,7 +261,7 @@ function movement(picture: ImageBitmap): { x: number; y: number } | null {
   return { x: sx / w / MW, y: sy / w / MH }
 }
 
-function look(picture: ImageBitmap, t: number): Seen {
+function look(picture: ImageBitmap, t: number): Seen & { wantsFace?: boolean } {
   let face: FaceLandmarkerResult | null = null
   if (landmarker && t > lastT) {
     lastT = t
@@ -199,7 +301,14 @@ function look(picture: ImageBitmap, t: number): Seen {
     shown = face ? copied(face, sec) : undefined
     const turned = shown ? Math.abs(shown.yaw) < 0.45 && Math.abs(shown.pitch) < 0.45 : true
     near = maxX - minX >= CLOSE && turned
+    facePoints = points
+    if (faceSince < 0) {
+      faceSince = t
+      faceSent = 0
+    }
   } else if (face) {
+    facePoints = null
+    faceSince = -1
     // The face has gone; the next one starts fresh rather than sliding in
     // from where this one was.
     for (const f of [parts, turns]) f.reset()
@@ -213,6 +322,15 @@ function look(picture: ImageBitmap, t: number): Seen {
     since = t
   }
 
+  const frontal = !!shown && Math.abs(shown.yaw) < 0.35 && Math.abs(shown.pitch) < 0.35 && Math.abs(shown.roll) < 0.5
+  if (wantsFace(t, frontal)) {
+    faceSent++
+    return { ...seenAs(fx, fy, points, shown), wantsFace: true }
+  }
+  return seenAs(fx, fy, points, shown)
+}
+
+function seenAs(fx: number, fy: number, points: unknown, shown: Copied | undefined): Seen {
   // Mirrored, so that your right is her left.
   if (watching === 'copy') return { watching, x: 1 - fx * 2, y: fy * 2 - 1, face: shown }
   if (watching === 'motion') {
@@ -235,6 +353,17 @@ self.onmessage = (e: MessageEvent) => {
         // Without the face finder she still follows movement.
         self.postMessage({ kind: 'failed', why: String(err?.message ?? err) })
       })
+    return
+  }
+  if (m.kind === 'face') {
+    const picture = m.picture as ImageBitmap
+    const seconds = faceSince < 0 ? 0 : (m.t - faceSince) / 1000
+    faceFrom(picture)
+      .then((f) => {
+        if (f) self.postMessage({ kind: 'face', face: { ...f, seconds } })
+      })
+      .catch(() => {})
+      .finally(() => picture.close())
     return
   }
   if (m.kind === 'picture') {

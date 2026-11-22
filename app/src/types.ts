@@ -28,6 +28,41 @@ export interface EventMeta {
   intensity?: number
   touches?: string
   about?: string
+  // A picture that goes with it, and what answering it settles.
+  image_id?: number
+  subject?: string
+}
+
+// One sighting of a face; person_id -1 is the user.
+export interface Face {
+  id: number
+  at: string
+  image_id: number
+  person_id: number
+  group_id: number
+  score: number
+  status: 'confirmed' | 'known' | 'maybe' | 'unknown'
+  seconds: number
+}
+
+// Someone seen but not known yet: every sighting and the best picture.
+export interface UnknownGroup {
+  id: number
+  faces: Face[]
+  cover: number
+  seen: number
+  seconds: number
+  last: string
+}
+
+// Which of her senses are set up.
+export interface Senses {
+  faces: boolean
+  voices: boolean
+  missing: string[]
+  knows_you: boolean
+  knows_her: boolean
+  unknown: number
 }
 
 export interface StreamEvent {
@@ -209,6 +244,8 @@ export interface PersonDetail {
   connections: Connection[]
   user: string
   companion: string
+  faces: Face[]
+  voice: boolean
 }
 
 export interface Feed {
@@ -297,6 +334,12 @@ export interface Config {
   name_sounds_like: string[] | null
   listen_window: number
   room_minutes: number
+  remember_faces: boolean
+  answer_others: boolean
+  unknown_face_days: number
+  face_sure: number
+  face_maybe: number
+  voice_sure: number
   location: string
   main: Endpoint
   worker: Endpoint

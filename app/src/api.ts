@@ -78,6 +78,11 @@ export interface Heard {
   addressed: boolean
   ending: boolean
   window: number
+  // Whose voice it was: you, her (her own, back through the speakers), a
+  // person she knows, or someone. Empty when she knows no voices yet.
+  speaker: { who: '' | 'you' | 'her' | 'person' | 'someone'; name?: string; person_id?: number; score: number }
+  // Whether she answers people other than the user who say her name.
+  others: boolean
 }
 
 // apiHear sends a recording to the core and gets back the words in it.
@@ -91,7 +96,29 @@ export async function apiHear(wav: ArrayBuffer): Promise<Heard> {
   }
   const data = await res.json().catch(() => null)
   if (!res.ok) throw new Error(data?.error ?? `The core answered ${res.status}.`)
-  return { text: data?.text ?? '', addressed: !!data?.addressed, ending: !!data?.ending, window: data?.window ?? 25 }
+  return {
+    text: data?.text ?? '',
+    addressed: !!data?.addressed,
+    ending: !!data?.ending,
+    window: data?.window ?? 25,
+    speaker: data?.speaker ?? { who: '', score: 0 },
+    others: !!data?.others,
+  }
+}
+
+// apiRecording sends a recording to the core, as for a voiceprint.
+export async function apiRecording(path: string, wav: ArrayBuffer): Promise<void> {
+  const c = await conn()
+  let res: Response
+  try {
+    res = await fetch(c.baseUrl + path, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'Content-Type': 'audio/wav' }, body: wav })
+  } catch {
+    throw new Error('The core is not answering. Is it still running?')
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.error ?? `The core answered ${res.status}.`)
+  }
 }
 
 // useAsset gives an address an <img> can load from the core. An image
@@ -147,10 +174,12 @@ export function useSignals(handler: Listener) {
 }
 
 // useLoad fetches a path and gives back the data, any error, and a reload.
+// An empty path loads nothing.
 export function useLoad<T>(path: string) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
   const reload = useCallback(() => {
+    if (!path) return
     api<T>(path)
       .then((d) => {
         setData(d)

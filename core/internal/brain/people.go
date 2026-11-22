@@ -2,6 +2,7 @@ package brain
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,10 @@ type PersonView struct {
 	Connections []Connection   `json:"connections"`
 	User        string         `json:"user"`
 	Companion   string         `json:"companion"`
+	// Faces are the pictures she has of them, newest first; Voice says
+	// whether she knows their voice.
+	Faces []store.Face `json:"faces"`
+	Voice bool         `json:"voice"`
 }
 
 var errNoPerson = errors.New("no such person")
@@ -115,6 +120,15 @@ func (b *Brain) Person(id int64) (PersonView, error) {
 	}
 	names := PersonNames(p)
 	view := PersonView{Person: p, Memories: []store.Memory{}, Weeks: make([]int, 12), Connections: []Connection{}, User: b.Cfg.Get().UserName, Companion: b.Cfg.Get().CompanionName}
+	view.Faces, _ = b.S.FacesOf(id)
+	slices.Reverse(view.Faces)
+	if len(view.Faces) > 24 {
+		view.Faces = view.Faces[:24]
+	}
+	prints, _ := b.S.Voiceprints()
+	for _, v := range prints {
+		view.Voice = view.Voice || (v.Owner == "person" && v.PersonID == id)
+	}
 	all, _ := b.S.Memories()
 	for _, m := range all {
 		if (m.Kind == "fact" || m.Kind == "reflection") && Mentions(m.Content, names) {
@@ -274,6 +288,10 @@ func (b *Brain) MergePerson(fromID, intoID int64) (store.Person, error) {
 	if _, err := b.S.SavePerson(into, b.Now()); err != nil {
 		return into, err
 	}
+	// Their faces and voice are the same person's too.
+	if err := b.S.MovePrints(from.ID, into.ID); err != nil {
+		return into, err
+	}
 	return into, b.S.DeletePerson(from.ID)
 }
 
@@ -283,6 +301,8 @@ func (b *Brain) ForgetPerson(id int64) error {
 	if _, _, err := b.person(id); err != nil {
 		return err
 	}
+	// Forgetting someone takes their pictures and voice with them.
+	b.forgetPrints(id)
 	return b.S.ForgetPerson(id)
 }
 

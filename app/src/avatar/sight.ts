@@ -57,9 +57,21 @@ const PH = 240
 const MODEL = './mediapipe/face_landmarker.task'
 const full = (path: string) => new URL(path, location.href).href
 
+// A face she followed long enough to remember: a crop to keep (JPEG) and
+// the face lined up for its print (112 by 112 RGB), both base64.
+export interface Remembered {
+  jpeg: string
+  rgb: string
+  seconds: number
+}
+
 // Opens the camera into the given video element and reports what she
-// makes of it until stopped.
-export async function openSight(video: HTMLVideoElement, report: (seen: Seen) => void): Promise<{ stop: () => void }> {
+// makes of it until stopped. Faces worth remembering go to remember.
+export async function openSight(
+  video: HTMLVideoElement,
+  report: (seen: Seen) => void,
+  remember?: (face: Remembered) => void,
+): Promise<{ stop: () => void }> {
   const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false })
   video.srcObject = stream
   video.muted = true
@@ -70,12 +82,34 @@ export async function openSight(video: HTMLVideoElement, report: (seen: Seen) =>
   worker.postMessage({ kind: 'start', urls: { loader: full(wasmLoaderPath), wasm: full(wasmBinaryPath), model: full(MODEL) } })
   let stopped = false
   let busy = false
-  worker.onmessage = (e: MessageEvent<{ kind: 'ready' } | { kind: 'failed'; why: string } | { kind: 'seen'; seen: Seen }>) => {
+  type Said =
+    | { kind: 'ready' }
+    | { kind: 'failed'; why: string }
+    | { kind: 'seen'; seen: Seen & { wantsFace?: boolean } }
+    | { kind: 'face'; face: Remembered }
+  worker.onmessage = (e: MessageEvent<Said>) => {
     const m = e.data
     if (m.kind === 'failed') console.warn(`She cannot find faces, only movement: ${m.why}`)
+    if (m.kind === 'face') {
+      if (!stopped) remember?.(m.face)
+      return
+    }
     if (m.kind !== 'seen') return
     busy = false
-    if (!stopped) report(m.seen)
+    if (stopped) return
+    const { wantsFace, ...seen } = m.seen
+    report(seen)
+    // The face is looked at again in the full picture, for a crop sharp
+    // enough to know someone by.
+    if (wantsFace && remember) {
+      const t = performance.now()
+      createImageBitmap(video)
+        .then((picture) => {
+          if (stopped) return picture.close()
+          worker.postMessage({ kind: 'face', picture, t }, [picture])
+        })
+        .catch(() => {})
+    }
   }
 
   const timer = window.setInterval(() => {

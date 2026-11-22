@@ -1,6 +1,8 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, useLoad, useSignals } from '../api'
 import { Avatar, type HerView } from '../avatar/Avatar'
+import { asksToLook, glance } from '../avatar/glance'
+import { FaceAsk } from '../faces'
 import { clock, longDate, when } from '../format'
 import { Linked, Meters, Problem } from '../parts'
 import type { Run, State, Step, StepSignal, StreamEvent, Today } from '../types'
@@ -257,8 +259,10 @@ export function Nova({ state }: { state: State | null }) {
     let next = say
     let aloud = spoken
     while (next) {
+      // Asked to look, she takes one still from her camera, if it is on.
+      const seen = asksToLook(next) ? glance() : null
       try {
-        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud } })
+        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud, ...(seen ? { seen } : {}) } })
       } catch (err) {
         setSendError((err as Error).message)
       }
@@ -360,7 +364,11 @@ export function Nova({ state }: { state: State | null }) {
                 <p>
                   <Linked text={m.text} />
                 </p>
-                {m.meta?.reason && <p className="why">Why: {m.meta.reason}</p>}
+                {m.meta?.image_id && m.meta.subject ? (
+                  <FaceAsk subject={m.meta.subject} image={m.meta.image_id} user={state?.user ?? 'you'} />
+                ) : (
+                  m.meta?.reason && <p className="why">Why: {m.meta.reason}</p>
+                )}
               </article>
             ) : (
               <article className="reply" key={m.id}>
