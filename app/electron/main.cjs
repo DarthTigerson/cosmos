@@ -1,11 +1,12 @@
 // The Electron shell. It owns the window and nothing else: Nova's mind is
 // the cosmos-core process, which this file starts and stops.
-const { app, BrowserWindow, ipcMain, dialog, shell, session, systemPreferences } = require('electron')
+const { app, BrowserWindow, Menu, clipboard, ipcMain, dialog, shell, session, systemPreferences } = require('electron')
 const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const net = require('node:net')
 const path = require('node:path')
+const system = require('./system.cjs')
 
 let core = null
 let conn = null
@@ -72,7 +73,7 @@ function spawnCore(port) {
     const now = Date.now()
     restarts = restarts.filter((t) => now - t < 60000)
     if (restarts.length >= 5) {
-      dialog.showErrorBox('Nova stopped', `The core keeps exiting (code ${code}).\n\n${lastLines}`)
+      dialog.showErrorBox('The core stopped', `The core keeps exiting (code ${code}).\n\n${lastLines}`)
       app.quit()
       return
     }
@@ -108,6 +109,34 @@ async function startCore() {
   return { baseUrl, token }
 }
 
+// The menu is Electron's usual one, except for text size: ⌘⇧+ / ⌘⇧− / ⌘⇧0
+// ask the page to change it (it keeps the size and shows it in the footer).
+// The plain ⌘+ / ⌘− / ⌘0 page zoom is left out on purpose.
+function setMenu() {
+  const size = (dir) => () => BrowserWindow.getFocusedWindow()?.webContents.send('cosmos:text-size', dir)
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { label: 'Actual Text Size', accelerator: 'CmdOrCtrl+Shift+0', click: size('reset') },
+        { label: 'Larger Text', accelerator: 'CmdOrCtrl+Shift+=', click: size('larger') },
+        { label: 'Smaller Text', accelerator: 'CmdOrCtrl+Shift+-', click: size('smaller') },
+        { type: 'separator' },
+        { label: 'Fold Side Nav', accelerator: 'CmdOrCtrl+B', click: () => BrowserWindow.getFocusedWindow()?.webContents.send('cosmos:toggle-nav') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]))
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1240,
@@ -115,17 +144,19 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 18 },
+    trafficLightPosition: { x: 14, y: 10 },
     backgroundColor: '#0b0e17',
     show: !process.env.COSMOS_SCREENSHOT_DIR,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   })
-  // The only thing the page may ask for is the microphone, for talking
-  // to her. Everything else is refused.
+  // The only things the page may ask for are the microphone, for talking
+  // to her, and the camera, for her to see you. Everything else is refused.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, done, details) => {
-    if (permission !== 'media' || (details.mediaTypes || []).includes('video')) return done(false)
-    if (process.platform === 'darwin') systemPreferences.askForMediaAccess('microphone').then(done, () => done(false))
-    else done(true)
+    if (permission !== 'media') return done(false)
+    if (process.platform !== 'darwin') return done(true)
+    const kinds = details.mediaTypes || []
+    const asks = [kinds.includes('audio') && 'microphone', kinds.includes('video') && 'camera'].filter(Boolean)
+    Promise.all(asks.map((kind) => systemPreferences.askForMediaAccess(kind))).then((ok) => done(ok.every(Boolean)), () => done(false))
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -196,6 +227,16 @@ app.whenReady().then(async () => {
     return
   }
   ipcMain.handle('cosmos:conn', () => conn)
+  ipcMain.handle('cosmos:memory', () => system.memory())
+  ipcMain.handle('cosmos:memory-breakdown', () => system.breakdown(app.getAppMetrics().map((p) => p.pid)))
+  ipcMain.handle('cosmos:battery', () => system.battery())
+  // Copying goes through here: the page is refused the browser's own
+  // clipboard permission along with everything else. Text only, and
+  // only ever written, never read.
+  ipcMain.handle('cosmos:copy', (_e, text) => {
+    if (typeof text === 'string' && text.length <= 1_000_000) clipboard.writeText(text)
+  })
+  setMenu()
   const win = createWindow()
   if (process.env.COSMOS_SCREENSHOT_DIR) screenshots(win, process.env.COSMOS_SCREENSHOT_DIR)
   app.on('activate', () => {
@@ -204,7 +245,7 @@ app.whenReady().then(async () => {
 })
 
 // Closing the window closes the app, and the app takes the core with it.
-// To keep Nova awake with the window shut, run cosmos-core on its own and
+// To keep her awake with the window shut, run cosmos-core on its own and
 // point the app at it with COSMOS_CORE_URL.
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {

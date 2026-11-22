@@ -38,6 +38,9 @@ func rankMemories(mems []store.Memory, query string, now time.Time, limit int) [
 	if len(mems) <= limit {
 		return mems
 	}
+	if pinned, rest := splitPinned(mems); len(pinned) > 0 {
+		return withPinned(pinned, rankMemories(rest, query, now, max(0, limit-len(pinned))), limit)
+	}
 	terms := map[string]bool{}
 	for _, t := range tokens(query) {
 		terms[t] = true
@@ -72,6 +75,31 @@ func rankMemories(mems []store.Memory, query string, now time.Time, limit int) [
 	for i := range picked {
 		picked[i] = all[i].m
 	}
+	sort.SliceStable(picked, func(i, j int) bool { return picked[i].CreatedAt.Before(picked[j].CreatedAt) })
+	return picked
+}
+
+// splitPinned separates the memories the user pinned from the rest.
+func splitPinned(mems []store.Memory) (pinned, rest []store.Memory) {
+	for _, m := range mems {
+		if m.Importance >= store.Pinned {
+			pinned = append(pinned, m)
+		} else {
+			rest = append(rest, m)
+		}
+	}
+	return pinned, rest
+}
+
+// withPinned puts the pinned memories back with the ones ranked from the
+// rest. Pinned ones always take their places; past the limit, the newest
+// pinned win. The result is oldest first, like any ranking.
+func withPinned(pinned, ranked []store.Memory, limit int) []store.Memory {
+	if len(pinned) > limit {
+		sort.SliceStable(pinned, func(i, j int) bool { return pinned[i].CreatedAt.After(pinned[j].CreatedAt) })
+		pinned = pinned[:limit]
+	}
+	picked := append(append([]store.Memory{}, pinned...), ranked...)
 	sort.SliceStable(picked, func(i, j int) bool { return picked[i].CreatedAt.Before(picked[j].CreatedAt) })
 	return picked
 }
@@ -446,7 +474,8 @@ func (b *Brain) findKnown(name string) (store.Person, bool) {
 func (b *Brain) rememberPerson(name, relationship, note string, now time.Time) {
 	name = strings.TrimSpace(name)
 	cfg := b.Cfg.Get()
-	if name == "" || strings.EqualFold(name, cfg.UserName) || strings.EqualFold(name, cfg.CompanionName) {
+	// Someone the user asked her to forget is not taken up again.
+	if name == "" || strings.EqualFold(name, cfg.UserName) || strings.EqualFold(name, cfg.CompanionName) || b.S.Forgotten(name) {
 		return
 	}
 	relationship = strings.TrimSpace(relationship)
@@ -462,12 +491,15 @@ func (b *Brain) rememberPerson(name, relationship, note string, now time.Time) {
 		if note != "" && !strings.Contains(norm(p.Notes), norm(note)) {
 			p.Notes = strings.TrimSpace(p.Notes + "\n" + note)
 		}
-		if relationship != "" && (placeholder(p.Relationship) || closenessFor(relationship) > p.Closeness) {
+		// What the user set by hand stands over what she picks up.
+		if relationship != "" && !p.Has("relationship") && (placeholder(p.Relationship) || closenessFor(relationship) > p.Closeness) {
 			p.Relationship = relationship
-			p.Closeness = closenessFor(relationship)
+			if !p.Has("closeness") {
+				p.Closeness = closenessFor(relationship)
+			}
 		}
 		// Learning the full name keeps the short one as another name.
-		if len(name) > len(p.Name) && strings.HasPrefix(strings.ToLower(name), strings.ToLower(p.Name)+" ") {
+		if !p.Has("name") && len(name) > len(p.Name) && strings.HasPrefix(strings.ToLower(name), strings.ToLower(p.Name)+" ") {
 			p.Aliases = append(p.Aliases, p.Name)
 			p.Name = name
 		}

@@ -399,6 +399,22 @@ func (b *Brain) RemoveFeed(id int64) error {
 
 // QueueEpisode asks her to listen to an episode she had left alone, or
 // to try again one that failed.
+// UnqueueEpisode takes an episode out of the queue before she starts on
+// it. It waits again, as if never asked for.
+func (b *Brain) UnqueueEpisode(id int64) error {
+	e, ok := b.S.GetEpisode(id)
+	if !ok {
+		return errors.New("no such episode")
+	}
+	if e.Status != "queued" {
+		return errors.New("that episode is not waiting in the queue")
+	}
+	e.Status = "waiting"
+	err := b.S.SaveEpisode(e)
+	b.podChanged()
+	return err
+}
+
 func (b *Brain) QueueEpisode(id int64) error {
 	e, ok := b.S.GetEpisode(id)
 	if !ok {
@@ -790,7 +806,7 @@ func notHer(cfg config.Config, text string) string {
 func (b *Brain) heardNotes(mems []store.Memory, query string, now time.Time) (string, []string) {
 	heard := []store.Memory{}
 	for _, m := range mems {
-		if m.Kind == "heard" || m.Kind == "view" {
+		if m.Kind == "heard" || (m.Kind == "view" && !isBookMemory(m)) {
 			heard = append(heard, m)
 		}
 	}
@@ -816,6 +832,28 @@ func (b *Brain) heardNotes(mems []store.Memory, query string, now time.Time) (st
 
 // searchPodcasts looks through what she took from the episodes she has
 // listened to.
+// followsShow reports whether a query names a show she follows: every
+// word of it is in the show's title. An empty query names none, and asks
+// about what she has heard.
+func (b *Brain) followsShow(query string) bool {
+	q := tokens(query)
+	if len(q) == 0 {
+		return true
+	}
+	feeds, _ := b.S.Feeds()
+	for _, f := range feeds {
+		title := " " + norm(f.Title) + " "
+		all := true
+		for _, t := range q {
+			all = all && strings.Contains(title, " "+t)
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Brain) searchPodcasts(query string) (any, error) {
 	done, err := b.S.Episodes(0, 40, "done")
 	if err != nil {
@@ -932,10 +970,11 @@ type PodcastsView struct {
 	Done     []store.Episode `json:"done"`
 	Failed   []store.Episode `json:"failed"`
 	Listened map[int64]int   `json:"listened"` // feed id -> episodes finished
+	Unheard  map[int64]int   `json:"unheard"`  // feed id -> episodes she has not taken on
 }
 
 func (b *Brain) Podcasts() PodcastsView {
-	v := PodcastsView{Enabled: b.PodDir != "" && b.Cfg.Get().Podcasts, Listened: map[int64]int{}}
+	v := PodcastsView{Enabled: b.PodDir != "" && b.Cfg.Get().Podcasts, Listened: map[int64]int{}, Unheard: map[int64]int{}}
 	if b.Transcribe != nil {
 		v.Missing = b.Transcribe.Ready()
 	}
@@ -947,11 +986,16 @@ func (b *Brain) Podcasts() PodcastsView {
 		v.Current = &now[0]
 	}
 	v.Queued, _ = b.S.Episodes(0, 20, "queued")
-	v.Done, _ = b.S.Episodes(0, 30, "done")
+	// Enough for the screen to search and filter what she heard.
+	v.Done, _ = b.S.Episodes(0, 200, "done")
 	v.Failed, _ = b.S.Episodes(0, 10, "failed")
 	all, _ := b.S.Episodes(0, 100000, "done")
 	for _, e := range all {
 		v.Listened[e.FeedID]++
+	}
+	waiting, _ := b.S.Episodes(0, 100000, "waiting")
+	for _, e := range waiting {
+		v.Unheard[e.FeedID]++
 	}
 	return v
 }

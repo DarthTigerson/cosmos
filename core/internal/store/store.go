@@ -97,7 +97,7 @@ func Open(path string) (*Store, error) {
 	}
 	// One connection keeps writes ordered and makes :memory: behave.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + sightSchema + booksSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -111,6 +111,10 @@ func Open(path string) (*Store, error) {
 		{"events", "session_id INTEGER NOT NULL DEFAULT 0"},
 		{"calendar", "repeat TEXT NOT NULL DEFAULT ''"},
 		{"episodes", "thoughts TEXT NOT NULL DEFAULT '[]'"},
+		{"people", "locked TEXT NOT NULL DEFAULT '[]'"},
+		{"people", "forgotten INTEGER NOT NULL DEFAULT 0"},
+		{"intentions", "image_id INTEGER NOT NULL DEFAULT 0"},
+		{"intentions", "subject TEXT NOT NULL DEFAULT ''"},
 	} {
 		name, _, _ := strings.Cut(add[1], " ")
 		var n int
@@ -246,6 +250,28 @@ func (s *Store) RecentEvents(n int, kinds ...string) ([]Event, error) {
 		evs[i], evs[j] = evs[j], evs[i]
 	}
 	return evs, err
+}
+
+// EventsMentioning returns the events of the given kinds whose text
+// contains any of the words, newest first. It is a rough filter: callers
+// check for whole words themselves.
+func (s *Store) EventsMentioning(words []string, kinds ...string) ([]Event, error) {
+	if len(words) == 0 {
+		return []Event{}, nil
+	}
+	likes := make([]string, len(words))
+	args := []any{}
+	for i, w := range words {
+		likes[i] = `lower(text) LIKE ?`
+		args = append(args, "%"+strings.ToLower(w)+"%")
+	}
+	clause, extra := kindFilter(kinds)
+	args = append(args, extra...)
+	rows, err := s.db.Query(`SELECT id,at,kind,actor,text,importance,meta,session_id FROM events WHERE (`+strings.Join(likes, " OR ")+`)`+clause+` ORDER BY at DESC,id DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return scanEvents(rows)
 }
 
 // SessionEvents returns the last n events of a session in the given kinds,
@@ -456,6 +482,54 @@ func (s *Store) Replaced() (map[int64]string, error) {
 	return out, rows.Err()
 }
 
+// Past is one wording a memory used to have, and when it was learned.
+type Past struct {
+	Content string    `json:"content"`
+	Since   time.Time `json:"since"`
+}
+
+// Histories returns, for each memory that replaced another, every wording
+// before it, newest first.
+func (s *Store) Histories() (map[int64][]Past, error) {
+	old, err := s.queryMemories(`WHERE superseded_by<>0 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	before := map[int64]Memory{}
+	for _, m := range old {
+		before[m.SupersededBy] = m
+	}
+	out := map[int64][]Past{}
+	for id := range before {
+		// The bound guards against a loop in a hand-edited database.
+		for cur := id; len(out[id]) < 50; {
+			m, ok := before[cur]
+			if !ok {
+				break
+			}
+			out[id] = append(out[id], Past{Content: m.Content, Since: m.CreatedAt})
+			cur = m.ID
+		}
+	}
+	return out, nil
+}
+
+// ForgottenMemories are the memories the user put away, newest first.
+// Memories set aside because a newer one replaced them are history, not
+// forgotten, and are left out.
+func (s *Store) ForgottenMemories() ([]Memory, error) {
+	return s.queryMemories(`WHERE archived=1 AND superseded_by=0 ORDER BY id DESC`)
+}
+
+// Pinned is the importance of a memory the user asked her to keep in
+// mind. Pinned memories are always offered to the model.
+const Pinned = 5
+
+func (s *Store) SetMemoryImportance(id int64, importance int) error {
+	_, err := s.db.Exec(`UPDATE memories SET importance=? WHERE id=?`, importance, id)
+	return err
+}
+
 func (s *Store) SetMemoryArchived(id int64, archived bool) error {
 	_, err := s.db.Exec(`UPDATE memories SET archived=? WHERE id=?`, archived, id)
 	return err
@@ -512,10 +586,56 @@ type Person struct {
 	Closeness     float64   `json:"closeness"` // 0 stranger .. 1 closest
 	Notes         string    `json:"notes"`
 	LastMentioned time.Time `json:"last_mentioned"`
+	// Locked names the fields the user set by hand ("relationship",
+	// "closeness", ...). What she learns from conversation leaves them be.
+	Locked []string `json:"locked"`
 }
 
+// Has reports whether the user set this field by hand.
+func (p Person) Has(field string) bool {
+	for _, f := range p.Locked {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
+// People returns everyone she knows, closest first. People the user
+// asked her to forget are left out.
 func (s *Store) People() ([]Person, error) {
-	rows, err := s.db.Query(`SELECT id,name,aliases,relationship,closeness,notes,last_mentioned FROM people ORDER BY closeness DESC, name`)
+	return s.queryPeople(`WHERE forgotten=0 ORDER BY closeness DESC, name`)
+}
+
+// Forgotten reports whether the user asked her to forget someone by this
+// name, so conversation does not bring them back.
+func (s *Store) Forgotten(name string) bool {
+	want := strings.ToLower(strings.TrimSpace(name))
+	gone, _ := s.queryPeople(`WHERE forgotten=1`)
+	for _, p := range gone {
+		for _, n := range append([]string{p.Name}, p.Aliases...) {
+			if strings.ToLower(n) == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Store) ForgetPerson(id int64) error {
+	_, err := s.db.Exec(`UPDATE people SET forgotten=1 WHERE id=?`, id)
+	return err
+}
+
+// DeletePerson removes someone outright, as when they are merged into
+// another person.
+func (s *Store) DeletePerson(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM people WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) queryPeople(where string, args ...any) ([]Person, error) {
+	rows, err := s.db.Query(`SELECT id,name,aliases,relationship,closeness,notes,last_mentioned,locked FROM people `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -523,14 +643,18 @@ func (s *Store) People() ([]Person, error) {
 	out := []Person{}
 	for rows.Next() {
 		var p Person
-		var aliases string
+		var aliases, locked string
 		var lm int64
-		if err := rows.Scan(&p.ID, &p.Name, &aliases, &p.Relationship, &p.Closeness, &p.Notes, &lm); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &aliases, &p.Relationship, &p.Closeness, &p.Notes, &lm, &locked); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(aliases), &p.Aliases)
 		if p.Aliases == nil {
 			p.Aliases = []string{}
+		}
+		json.Unmarshal([]byte(locked), &p.Locked)
+		if p.Locked == nil {
+			p.Locked = []string{}
 		}
 		p.LastMentioned = fromMs(lm)
 		out = append(out, p)
@@ -563,18 +687,22 @@ func (s *Store) SavePerson(p Person, now time.Time) (Person, error) {
 	if p.Aliases == nil {
 		p.Aliases = []string{}
 	}
+	if p.Locked == nil {
+		p.Locked = []string{}
+	}
 	aliases, _ := json.Marshal(p.Aliases)
+	locked, _ := json.Marshal(p.Locked)
 	if p.ID == 0 {
-		res, err := s.db.Exec(`INSERT INTO people(name,aliases,relationship,closeness,notes,last_mentioned,created_at) VALUES(?,?,?,?,?,?,?)`,
-			p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), ms(now))
+		res, err := s.db.Exec(`INSERT INTO people(name,aliases,relationship,closeness,notes,last_mentioned,created_at,locked) VALUES(?,?,?,?,?,?,?,?)`,
+			p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), ms(now), string(locked))
 		if err != nil {
 			return p, err
 		}
 		p.ID, _ = res.LastInsertId()
 		return p, nil
 	}
-	_, err := s.db.Exec(`UPDATE people SET name=?,aliases=?,relationship=?,closeness=?,notes=?,last_mentioned=? WHERE id=?`,
-		p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), p.ID)
+	_, err := s.db.Exec(`UPDATE people SET name=?,aliases=?,relationship=?,closeness=?,notes=?,last_mentioned=?,locked=? WHERE id=?`,
+		p.Name, string(aliases), p.Relationship, p.Closeness, p.Notes, ms(p.LastMentioned), string(locked), p.ID)
 	return p, err
 }
 
@@ -670,6 +798,11 @@ type Intention struct {
 	CreatedAt  time.Time `json:"created_at"`
 	SentAt     time.Time `json:"sent_at"`
 	Answered   bool      `json:"answered"`
+	// ImageID is a picture that goes with it ("who is this?"), or 0.
+	ImageID int64 `json:"image_id,omitempty"`
+	// Subject says what answering it settles, as "faces:<group>" or
+	// "maybe:<face>"; empty for most.
+	Subject string `json:"subject,omitempty"`
 }
 
 func (s *Store) AddIntention(i Intention) (Intention, error) {
@@ -677,8 +810,8 @@ func (s *Store) AddIntention(i Intention) (Intention, error) {
 		i.Importance = 2
 	}
 	i.Status = "open"
-	res, err := s.db.Exec(`INSERT INTO intentions(kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-		i.Kind, i.Text, i.Reason, i.Facts, ms(i.TriggerAt), ms(i.ExpiresAt), i.Importance, i.Status, ms(i.CreatedAt))
+	res, err := s.db.Exec(`INSERT INTO intentions(kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at,image_id,subject) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		i.Kind, i.Text, i.Reason, i.Facts, ms(i.TriggerAt), ms(i.ExpiresAt), i.Importance, i.Status, ms(i.CreatedAt), i.ImageID, i.Subject)
 	if err != nil {
 		return i, err
 	}
@@ -688,7 +821,7 @@ func (s *Store) AddIntention(i Intention) (Intention, error) {
 
 // Intentions lists intentions in the given statuses, soonest trigger first.
 func (s *Store) Intentions(statuses ...string) ([]Intention, error) {
-	q := `SELECT id,kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at,sent_at,answered FROM intentions`
+	q := `SELECT id,kind,text,reason,facts,trigger_at,expires_at,importance,status,created_at,sent_at,answered,image_id,subject FROM intentions`
 	args := []any{}
 	if len(statuses) > 0 {
 		q += ` WHERE status IN (?` + strings.Repeat(",?", len(statuses)-1) + `)`
@@ -705,7 +838,7 @@ func (s *Store) Intentions(statuses ...string) ([]Intention, error) {
 	for rows.Next() {
 		var i Intention
 		var t, e, c, sent int64
-		if err := rows.Scan(&i.ID, &i.Kind, &i.Text, &i.Reason, &i.Facts, &t, &e, &i.Importance, &i.Status, &c, &sent, &i.Answered); err != nil {
+		if err := rows.Scan(&i.ID, &i.Kind, &i.Text, &i.Reason, &i.Facts, &t, &e, &i.Importance, &i.Status, &c, &sent, &i.Answered, &i.ImageID, &i.Subject); err != nil {
 			return nil, err
 		}
 		i.TriggerAt, i.ExpiresAt, i.CreatedAt, i.SentAt = fromMs(t), fromMs(e), fromMs(c), fromMs(sent)
@@ -885,6 +1018,15 @@ func (s *Store) AddRun(r Run) (Run, error) {
 func (s *Store) SetRunSteps(id int64, steps []Step) error {
 	raw, _ := json.Marshal(steps)
 	_, err := s.db.Exec(`UPDATE runs SET steps=? WHERE id=?`, string(raw), id)
+	return err
+}
+
+// AddRunStep adds one step to the end of a run's steps, for a step that
+// finishes after the run was recorded: the feeling, or when her voice
+// was first heard.
+func (s *Store) AddRunStep(id int64, step Step) error {
+	raw, _ := json.Marshal(step)
+	_, err := s.db.Exec(`UPDATE runs SET steps=json_insert(CASE WHEN json_valid(steps) THEN steps ELSE '[]' END,'$[#]',json(?)) WHERE id=?`, string(raw), id)
 	return err
 }
 

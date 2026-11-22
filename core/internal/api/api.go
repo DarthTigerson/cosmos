@@ -8,15 +8,18 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cosmos/core/internal/brain"
@@ -34,6 +37,14 @@ type Server struct {
 	// Voice is her speaking voice. Nil, or not set up, falls back to the
 	// computer's built-in one.
 	Voice *voice.Manager
+	// Hearing writes out what the user says. Nil uses whisper-cli, which
+	// loads the model for every clip.
+	Hearing *voice.Hearing
+	// Senses turns faces and voices into prints; nil when not set up.
+	Senses *voice.Senses
+
+	callMu  sync.Mutex
+	current *call
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -55,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/state", s.auth(s.state))
 	mux.HandleFunc("GET /api/today", s.auth(s.today))
 	mux.HandleFunc("POST /api/message", s.auth(s.message))
+	mux.HandleFunc("POST /api/interrupt", s.auth(s.interrupt))
 	mux.HandleFunc("GET /api/sessions", s.auth(s.sessions))
 	mux.HandleFunc("POST /api/sessions", s.auth(s.newSession))
 	mux.HandleFunc("GET /api/sessions/{id}", s.auth(s.session))
@@ -68,6 +80,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/memories", s.auth(s.memories))
 	mux.HandleFunc("GET /api/people", s.auth(s.people))
 	mux.HandleFunc("GET /api/people/{id}", s.auth(s.person))
+	mux.HandleFunc("PUT /api/people/{id}", s.auth(s.changePerson))
+	mux.HandleFunc("POST /api/people/{id}/merge", s.auth(s.mergePerson))
+	mux.HandleFunc("POST /api/people/{id}/forget", s.auth(s.forgetPerson))
 	mux.HandleFunc("GET /api/calendar", s.auth(s.calendar))
 	mux.HandleFunc("GET /api/podcasts", s.auth(s.podcasts))
 	mux.HandleFunc("POST /api/podcasts/feeds", s.auth(s.addFeed))
@@ -77,9 +92,36 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/podcasts/episodes/{id}", s.auth(s.episode))
 	mux.HandleFunc("GET /api/podcasts/episodes/{id}/transcript", s.auth(s.episodeTranscript))
 	mux.HandleFunc("POST /api/podcasts/episodes/{id}/listen", s.auth(s.listenToEpisode))
+	mux.HandleFunc("POST /api/podcasts/episodes/{id}/unqueue", s.auth(s.unqueueEpisode))
+	mux.HandleFunc("GET /api/books", s.auth(s.books))
+	mux.HandleFunc("POST /api/books", s.auth(s.addBook))
+	mux.HandleFunc("GET /api/books/{id}", s.auth(s.book))
+	mux.HandleFunc("DELETE /api/books/{id}", s.auth(s.removeBook))
+	mux.HandleFunc("GET /api/books/{id}/cover", s.auth(s.bookCover))
+	mux.HandleFunc("GET /api/books/{id}/search", s.auth(s.searchBook))
+	mux.HandleFunc("POST /api/books/{id}/read", s.auth(s.readBook))
+	mux.HandleFunc("POST /api/books/{id}/unqueue", s.auth(s.unqueueBook))
+	mux.HandleFunc("POST /api/books/{id}/kind", s.auth(s.bookKind))
 	mux.HandleFunc("POST /api/memories/{id}/forget", s.auth(s.forgetMemory))
+	mux.HandleFunc("POST /api/memories/{id}/restore", s.auth(s.restoreMemory))
+	mux.HandleFunc("PUT /api/memories/{id}", s.auth(s.changeMemory))
 	mux.HandleFunc("POST /api/speech", s.auth(s.speech))
 	mux.HandleFunc("POST /api/hear", s.auth(s.hear))
+	mux.HandleFunc("POST /api/hear/ready", s.auth(s.hearReady))
+	mux.HandleFunc("GET /api/call", s.auth(s.call))
+	mux.HandleFunc("POST /api/overheard", s.auth(s.overheard))
+	mux.HandleFunc("DELETE /api/overheard", s.auth(s.forgetOverheard))
+	mux.HandleFunc("GET /api/senses", s.auth(s.senses))
+	mux.HandleFunc("POST /api/see", s.auth(s.see))
+	mux.HandleFunc("GET /api/images/{id}", s.auth(s.image))
+	mux.HandleFunc("GET /api/faces/unknown", s.auth(s.unknownFaces))
+	mux.HandleFunc("POST /api/faces/groups/{id}", s.auth(s.answerFaces))
+	mux.HandleFunc("POST /api/faces/maybe/{id}", s.auth(s.answerMaybe))
+	mux.HandleFunc("GET /api/faces/{id}", s.auth(s.getFace))
+	mux.HandleFunc("DELETE /api/faces/{id}", s.auth(s.forgetFace))
+	mux.HandleFunc("GET /api/people/{id}/faces", s.auth(s.personFaces))
+	mux.HandleFunc("POST /api/voiceprints/{owner}", s.auth(s.learnVoice))
+	mux.HandleFunc("DELETE /api/voiceprints/{owner}", s.auth(s.forgetVoice))
 	mux.HandleFunc("GET /api/voices", s.auth(s.voices))
 	mux.HandleFunc("PUT /api/voices", s.auth(s.setVoice))
 	mux.HandleFunc("POST /api/messages/{id}/feedback", s.auth(s.feedback))
@@ -106,7 +148,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -140,7 +182,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.B.State())
 }
 
-// today is the Nova screen: the current session and its thread.
+// today is the conversation screen: the current session and its thread.
 func (s *Server) today(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"state": s.B.State(), "messages": []store.Event{}}
 	open, _ := s.B.S.OpenSessions()
@@ -167,7 +209,7 @@ func (s *Server) today(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// sessions lists what she has not slept on yet, for the list under Nova.
+// sessions lists what she has not slept on yet, for the list under her name.
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	open, err := s.B.S.OpenSessions()
 	if err != nil {
@@ -232,19 +274,50 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Text string `json:"text"`
+		// Spoken: said aloud rather than typed.
+		Spoken bool `json:"spoken"`
+		// Seen: a picture from her camera, as a data: URI.
+		Seen string `json:"seen"`
+		// Heard: the number the call gave what was said, so how it was
+		// heard and how soon she answered go in the reply's run.
+		Heard int64 `json:"heard"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
 		fail(w, 400, "send {\"text\": \"...\"}")
 		return
 	}
 	// The turn finishes even if the window closes mid-reply, so her
 	// stream never holds a question without its answer.
-	reply, err := s.B.HandleMessage(context.WithoutCancel(r.Context()), in.Text)
+	ctx := context.WithoutCancel(r.Context())
+	if in.Seen != "" && !strings.HasPrefix(in.Seen, "data:image/") {
+		fail(w, 400, "seen must be a data:image/ address")
+		return
+	}
+	if in.Spoken || in.Seen != "" {
+		said := brain.Said{Aloud: in.Spoken, Seen: in.Seen}
+		if in.Spoken {
+			said.Room = s.B.Room()
+			said.Heard = s.heardSteps(in.Heard)
+		}
+		ctx = brain.WithSaid(ctx, said)
+	}
+	reply, err := s.B.HandleMessage(ctx, in.Text)
+	s.answered(in.Heard, reply.Run.ID)
+	if errors.Is(err, brain.ErrInterrupted) {
+		writeJSON(w, 200, map[string]any{"interrupted": true, "run": reply.Run})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "run": reply.Run})
 		return
 	}
 	writeJSON(w, 200, reply)
+}
+
+// interrupt stops the reply she is working on: the user has started
+// talking over her.
+func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]bool{"stopped": s.B.Interrupt()})
 }
 
 func (s *Server) mind(w http.ResponseWriter, r *http.Request) {
@@ -404,22 +477,107 @@ func (s *Server) undoTidy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"undone": true})
 }
 
+// memories lists what she holds, or with ?forgotten=1 what the user put
+// away. Each carries the wordings it replaced.
 func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
-	mems, err := s.B.S.Memories()
+	load := s.B.S.Memories
+	if r.URL.Query().Get("forgotten") == "1" {
+		load = s.B.S.ForgottenMemories
+	}
+	mems, err := load()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	replaced, _ := s.B.S.Replaced()
+	history, _ := s.B.S.Histories()
 	type view struct {
 		store.Memory
-		Replaced string `json:"replaced,omitempty"` // the wording this one took over from
+		History []store.Past `json:"history,omitempty"`
 	}
 	out := make([]view, len(mems))
 	for i, m := range mems {
-		out[i] = view{Memory: m, Replaced: replaced[m.ID]}
+		out[i] = view{Memory: m, History: history[m.ID]}
 	}
 	writeJSON(w, 200, out)
+}
+
+// changeMemory corrects a memory's wording or pins it. A correction
+// replaces the memory the way a changed fact does, so the old wording
+// stays on record.
+func (s *Server) changeMemory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	var in struct {
+		Content *string `json:"content"`
+		Pinned  *bool   `json:"pinned"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable change: "+err.Error())
+		return
+	}
+	m, err := s.B.S.GetMemory(id)
+	if err != nil {
+		fail(w, 404, "no such memory")
+		return
+	}
+	if m.Archived {
+		fail(w, 409, "this memory was put away; bring it back first")
+		return
+	}
+	if in.Pinned != nil {
+		m.Importance = 2
+		if *in.Pinned {
+			m.Importance = store.Pinned
+		}
+		if err := s.B.S.SetMemoryImportance(id, m.Importance); err != nil {
+			fail(w, 500, err.Error())
+			return
+		}
+	}
+	if in.Content != nil {
+		content := strings.TrimSpace(*in.Content)
+		if content == "" {
+			fail(w, 400, "a memory needs some words; forget it instead")
+			return
+		}
+		if content != m.Content {
+			next := m
+			next.Content, next.CreatedAt, next.UpdatedAt = content, s.B.Now(), time.Time{}
+			if m, err = s.B.S.Supersede(id, next); err != nil {
+				fail(w, 500, err.Error())
+				return
+			}
+		}
+	}
+	s.B.Bus.Publish("memories", nil)
+	writeJSON(w, 200, m)
+}
+
+// restoreMemory brings back a memory the user forgot.
+func (s *Server) restoreMemory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	m, err := s.B.S.GetMemory(id)
+	if err != nil {
+		fail(w, 404, "no such memory")
+		return
+	}
+	if m.SupersededBy != 0 {
+		fail(w, 409, "a newer memory replaced this one")
+		return
+	}
+	if err := s.B.S.SetMemoryArchived(id, false); err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	s.B.Bus.Publish("memories", nil)
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // getVoice returns who she is and how she talks, as the user can edit it.
@@ -448,73 +606,109 @@ func (s *Server) putVoice(w http.ResponseWriter, r *http.Request) {
 	s.getVoice(w, r)
 }
 
+// people lists everyone she knows. Someone whose relationship she does
+// not know yet comes with the last thing the user said about them, so the
+// screen can ask who they are.
 func (s *Server) people(w http.ResponseWriter, r *http.Request) {
 	people, err := s.B.S.People()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, people)
+	type view struct {
+		store.Person
+		Heard string `json:"heard,omitempty"`
+	}
+	out := make([]view, len(people))
+	for i, p := range people {
+		out[i] = view{Person: p}
+		if strings.TrimSpace(p.Relationship) == "" {
+			out[i].Heard = s.B.Heard(p)
+		}
+	}
+	writeJSON(w, 200, out)
 }
 
-// person gathers everything she holds about one person: the record
-// itself, the memories that mention them and the recent moments where
-// they came up.
+// person is one person in full: the memories and moments that name them,
+// how often they come up, and who is named alongside them.
 func (s *Server) person(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		fail(w, 400, "bad id")
 		return
 	}
-	people, err := s.B.S.People()
+	view, err := s.B.Person(id)
 	if err != nil {
-		fail(w, 500, err.Error())
+		s.personFail(w, err)
 		return
 	}
-	var found *store.Person
-	for i := range people {
-		if people[i].ID == id {
-			found = &people[i]
-		}
-	}
-	if found == nil {
-		fail(w, 404, "no such person")
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) personFail(w http.ResponseWriter, err error) {
+	if brain.IsNoPerson(err) {
+		fail(w, 404, err.Error())
 		return
 	}
-	names := []string{strings.ToLower(found.Name)}
-	for _, a := range found.Aliases {
-		if a = strings.ToLower(strings.TrimSpace(a)); a != "" {
-			names = append(names, a)
-		}
+	fail(w, 400, err.Error())
+}
+
+// changePerson applies an edit the user made by hand.
+func (s *Server) changePerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
 	}
-	// A full name also matches on its first word ("Bethany Bonnici").
-	if first, _, ok := strings.Cut(names[0], " "); ok && len(first) >= 3 {
-		names = append(names, first)
+	var in brain.PersonEdit
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable change: "+err.Error())
+		return
 	}
-	mentions := func(text string) bool {
-		t := strings.ToLower(text)
-		for _, n := range names {
-			if strings.Contains(t, n) {
-				return true
-			}
-		}
-		return false
+	p, err := s.B.EditPerson(id, in)
+	if err != nil {
+		s.personFail(w, err)
+		return
 	}
-	memories := []store.Memory{}
-	all, _ := s.B.S.Memories()
-	for _, m := range all {
-		if mentions(m.Content) {
-			memories = append(memories, m)
-		}
+	s.B.Bus.Publish("people", nil)
+	writeJSON(w, 200, p)
+}
+
+// mergePerson folds one person into another: {"into": id}.
+func (s *Server) mergePerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
 	}
-	moments := []store.Event{}
-	recent, _ := s.B.S.RecentEvents(400, "user_msg", "nova_msg", "initiative")
-	for i := len(recent) - 1; i >= 0 && len(moments) < 12; i-- {
-		if mentions(recent[i].Text) {
-			moments = append(moments, recent[i])
-		}
+	var in struct {
+		Into int64 `json:"into"`
 	}
-	writeJSON(w, 200, map[string]any{"person": found, "memories": memories, "moments": moments, "user": s.B.Cfg.Get().UserName})
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable merge: "+err.Error())
+		return
+	}
+	p, err := s.B.MergePerson(id, in.Into)
+	if err != nil {
+		s.personFail(w, err)
+		return
+	}
+	s.B.Bus.Publish("people", nil)
+	writeJSON(w, 200, p)
+}
+
+func (s *Server) forgetPerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	if err := s.B.ForgetPerson(id); err != nil {
+		s.personFail(w, err)
+		return
+	}
+	s.B.Bus.Publish("people", nil)
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) calendar(w http.ResponseWriter, r *http.Request) {
@@ -593,6 +787,16 @@ func (s *Server) episode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"episode": e, "show": feed.Title, "kept": s.B.EpisodeMemories(e)})
 }
 
+// unqueueEpisode takes an episode out of Up next.
+func (s *Server) unqueueEpisode(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.UnqueueEpisode(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func (s *Server) episodeTranscript(w http.ResponseWriter, r *http.Request) {
 	id, _ := pathID(r)
 	e, ok := s.B.S.GetEpisode(id)
@@ -652,34 +856,109 @@ func (s *Server) setVoice(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	// A new voice is a new voiceprint for her, or she would take her own
+	// words for someone else's.
+	if s.B.KnowsVoice("her") {
+		go func() {
+			ctx := context.Background()
+			if wav, err := s.herSample(ctx); err == nil {
+				s.B.LearnVoice(ctx, "her", wav)
+			}
+		}()
+	}
 	s.voices(w, r)
 }
 
 // hear takes a short recording from the microphone and returns the
 // words in it. Nothing leaves this computer.
 func (s *Server) hear(w http.ResponseWriter, r *http.Request) {
-	tmp, err := os.CreateTemp("", "cosmos-heard-*.wav")
-	if err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	defer os.Remove(tmp.Name())
 	// Two minutes of speech at most.
-	n, err := io.Copy(tmp, http.MaxBytesReader(w, r.Body, 8<<20))
-	tmp.Close()
-	if err != nil || n < 1000 {
+	wav, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if err != nil || len(wav) < 1000 {
 		fail(w, 400, "the recording was empty or too long")
 		return
 	}
+	cfg := s.B.Cfg.Get()
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	text, err := (&brain.WhisperCLI{}).Hear(ctx, tmp.Name())
+	// Whose voice it is, worked out while the words are.
+	spoke := make(chan brain.Speaker, 1)
+	go func() { spoke <- s.B.WhoSpoke(ctx, wav) }()
+	text, addressed, err := s.listen(ctx, cfg, wav, true)
 	if err != nil {
+		<-spoke
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]string{"text": text})
+	view := heardView(cfg, text)
+	view["addressed"] = addressed
+	view["speaker"] = <-spoke
+	writeJSON(w, 200, view)
 }
+
+// listen writes out the words in a recording, and says whether her name
+// is in them. needName is false when it makes no difference.
+func (s *Server) listen(ctx context.Context, cfg config.Config, wav []byte, needName bool) (string, bool, error) {
+	if s.Hearing != nil && s.Hearing.Missing(cfg.HearModel) == "" {
+		text, addressed, err := s.Hearing.HearFor(ctx, wav, cfg.HearModel, cfg.HearLanguage, voice.HearingPrompt(cfg.UserName, cfg.CompanionName, cfg.Location), cfg.CompanionName, cfg.NameSoundsLike, needName)
+		if err == nil {
+			return text, addressed, nil
+		}
+		s.B.Log.Printf("hear: %v; trying whisper-cli", err)
+	}
+	tmp, err := os.CreateTemp("", "cosmos-heard-*.wav")
+	if err != nil {
+		return "", false, err
+	}
+	defer os.Remove(tmp.Name())
+	tmp.Write(wav)
+	tmp.Close()
+	text, err := (&brain.WhisperCLI{}).Hear(ctx, tmp.Name())
+	if err != nil {
+		return "", false, err
+	}
+	return text, voice.Addressed(text, cfg.CompanionName, cfg.NameSoundsLike), nil
+}
+
+// heardView is the words heard, whether her name is in them, and
+// whether they close the conversation.
+func heardView(cfg config.Config, text string) map[string]any {
+	return map[string]any{
+		"text":      text,
+		"addressed": voice.Addressed(text, cfg.CompanionName, cfg.NameSoundsLike),
+		"ending":    voice.Ending(text),
+		"window":    cfg.ListenWindow,
+		"others":    cfg.AnswerOthers,
+	}
+}
+
+// overheard keeps something said nearby that was not meant for her, in
+// memory only, for her next reply.
+func (s *Server) overheard(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Text string `json:"text"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in) != nil {
+		fail(w, 400, "send {\"text\": \"...\"}")
+		return
+	}
+	s.B.Overhear(in.Text)
+	writeJSON(w, 200, map[string]bool{"kept": true})
+}
+
+func (s *Server) forgetOverheard(w http.ResponseWriter, r *http.Request) {
+	s.B.ForgetRoom()
+	writeJSON(w, 200, map[string]bool{"forgotten": true})
+}
+
+// hearReady gets her ears and her voice ready when listening starts, so
+// the first exchange is as quick as the rest.
+func (s *Server) hearReady(w http.ResponseWriter, r *http.Request) {
+	s.warm()
+	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
+}
+
+var webAddress = regexp.MustCompile(`(?i)\bhttps?://\S+|\bwww\.\S+`)
 
 // speech turns text into sound with the computer's own voice and sends
 // the sound back. The app plays it, and moves her mouth to it.
@@ -693,63 +972,67 @@ func (s *Server) speech(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "unreadable: "+err.Error())
 		return
 	}
-	// Marks that are for the eye, not the ear.
-	text := strings.NewReplacer("*", "", "_", " ", "`", "", "#", "", "\n", " ").Replace(in.Text)
-	text = strings.TrimSpace(text)
+	text := sayable(in.Text)
 	if text == "" {
 		fail(w, 400, "nothing to say")
 		return
 	}
-	if r := []rune(text); len(r) > 1500 {
-		text = string(r[:1500])
-	}
-	// Her own voice when it is set up; the computer's plain one if not.
-	if s.Voice != nil && s.Voice.Missing() == "" {
-		which := in.Voice
-		if which == "" {
-			which = s.B.Cfg.Get().Voice
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-		defer cancel()
-		spoken, err := s.Voice.Speak(ctx, text, which, 1)
-		if err != nil {
-			fail(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 200, spoken)
-		return
-	}
-	bin, err := exec.LookPath("say")
-	if err != nil {
-		fail(w, 501, "this computer has no built-in voice")
-		return
-	}
-	out, err := os.CreateTemp("", "cosmos-speech-*.wav")
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	wav, marks, err := s.spoken(ctx, text, in.Voice)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	writeJSON(w, 200, voice.Spoken{Audio: base64.StdEncoding.EncodeToString(wav), Marks: marks})
+}
+
+// sayable takes out of a reply what is for the eye, not the ear. An
+// address is not read out letter by letter; the chat has it.
+func sayable(text string) string {
+	text = webAddress.ReplaceAllString(text, "the link")
+	text = strings.NewReplacer("*", "", "_", " ", "`", "", "#", "", "\n", " ").Replace(text)
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > 1500 {
+		text = string(r[:1500])
+	}
+	return text
+}
+
+// spoken is text as sound, a WAV file, and when each speech sound in it
+// falls. Her own voice when it is set up (the one given, or hers); the
+// computer's plain one if not, which gives no timing.
+func (s *Server) spoken(ctx context.Context, text, which string) ([]byte, []json.RawMessage, error) {
+	if s.Voice != nil && s.Voice.Missing() == "" {
+		if which == "" {
+			which = s.B.Cfg.Get().Voice
+		}
+		out, err := s.Voice.Speak(ctx, text, which, 1)
+		if err != nil {
+			return nil, nil, err
+		}
+		wav, err := base64.StdEncoding.DecodeString(out.Audio)
+		return wav, out.Marks, err
+	}
+	bin, err := exec.LookPath("say")
+	if err != nil {
+		return nil, nil, errors.New("this computer has no built-in voice")
+	}
+	out, err := os.CreateTemp("", "cosmos-speech-*.wav")
+	if err != nil {
+		return nil, nil, err
+	}
 	out.Close()
 	defer os.Remove(out.Name())
-	args := []string{"-o", out.Name(), "--data-format=LEI16@22050"}
-	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, "-o", out.Name(), "--data-format=LEI16@22050")
 	// The words go in on standard input, so nothing in them is ever
 	// read as an option.
 	cmd.Stdin = strings.NewReader(text)
 	if msg, err := cmd.CombinedOutput(); err != nil {
-		fail(w, 500, "the voice did not work: "+strings.TrimSpace(string(msg)+" "+err.Error()))
-		return
+		return nil, nil, errors.New("the voice did not work: " + strings.TrimSpace(string(msg)+" "+err.Error()))
 	}
-	// The built-in voice gives no timing; the app falls back to moving
-	// her mouth by the sound alone.
 	wav, err := os.ReadFile(out.Name())
-	if err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, voice.Spoken{Audio: base64.StdEncoding.EncodeToString(wav), Marks: []json.RawMessage{}})
+	return wav, []json.RawMessage{}, err
 }
 
 func (s *Server) feedback(w http.ResponseWriter, r *http.Request) {
@@ -872,6 +1155,113 @@ func (s *Server) importConnections(w http.ResponseWriter, r *http.Request) {
 	s.connections(w, r)
 }
 
+func (s *Server) books(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.B.Books())
+}
+
+// addBook takes an EPUB sent as the "file" field of a form.
+func (s *Server) addBook(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 300<<20)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		fail(w, 400, "send the book as a file")
+		return
+	}
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			fail(w, 400, "no book was sent")
+			return
+		}
+		if part.FormName() != "file" {
+			continue
+		}
+		book, err := s.B.AddBook(part)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, book)
+		return
+	}
+}
+
+func (s *Server) book(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	book, ok := s.B.S.GetBook(id)
+	if !ok {
+		fail(w, 404, "no such book")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"book": book, "kept": s.B.BookMemories(book)})
+}
+
+func (s *Server) removeBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.RemoveBook(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) bookCover(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	book, ok := s.B.S.GetBook(id)
+	if !ok || book.CoverPath == "" {
+		fail(w, 404, "no cover")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, book.CoverPath)
+}
+
+func (s *Server) searchBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	book, ok := s.B.S.GetBook(id)
+	if !ok {
+		fail(w, 404, "no such book")
+		return
+	}
+	writeJSON(w, 200, s.B.SearchBook(book, r.URL.Query().Get("q"), 40))
+}
+
+// readBook queues a book: to read for the first time, again, or once
+// more after it failed.
+func (s *Server) readBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.QueueBook(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) unqueueBook(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.UnqueueBook(id); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) bookKind(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	var in struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&in); err != nil {
+		fail(w, 400, "unreadable: "+err.Error())
+		return
+	}
+	if err := s.B.SetBookKind(id, in.Kind); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // forgetMemory puts a memory away. It is archived, not deleted, so a
 // slip can be put right in the database.
 func (s *Server) forgetMemory(w http.ResponseWriter, r *http.Request) {
@@ -885,6 +1275,8 @@ func (s *Server) forgetMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.B.Bus.Publish("podcasts", nil)
+	s.B.Bus.Publish("books", nil)
+	s.B.Bus.Publish("memories", nil)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1018,6 +1410,14 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 // modelAction starts, stops or restarts the server for a tier. Loading a
 // model takes a while, so start returns at once and the screen follows
 // progress through GET /api/models.
+// restingWhy explains a model that is stopped because of her state.
+func restingWhy(tier string) string {
+	if tier == "sleeper" {
+		return "The sleep model only loads while she sleeps, so it never shares memory with the main and worker models."
+	}
+	return "She is asleep, so this model is stopped to leave room for the sleep model. It loads again when she wakes."
+}
+
 func (s *Server) modelAction(w http.ResponseWriter, r *http.Request) {
 	tier, action := r.PathValue("tier"), r.PathValue("action")
 	if s.Launch == nil {
@@ -1042,6 +1442,10 @@ func (s *Server) modelAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "choose a model file first")
 			return
 		}
+		if s.Launch.Resting(tier) {
+			fail(w, 409, restingWhy(tier))
+			return
+		}
 		start()
 	case "stop":
 		if err := s.Launch.Stop(tier); err != nil {
@@ -1049,6 +1453,10 @@ func (s *Server) modelAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "restart":
+		if s.Launch.Resting(tier) {
+			fail(w, 409, restingWhy(tier))
+			return
+		}
 		s.Launch.Stop(tier)
 		time.Sleep(400 * time.Millisecond)
 		start()
@@ -1091,4 +1499,185 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// ---------- what she sees, and voices ----------
+
+// senses says which of her senses are set up and whose voices she knows.
+func (s *Server) senses(w http.ResponseWriter, r *http.Request) {
+	view := map[string]any{"faces": false, "voices": false, "missing": []string{"the senses helper is not set up"}}
+	if s.Senses != nil {
+		view = map[string]any{"faces": s.Senses.CanSeeFaces(), "voices": s.Senses.CanHearVoices(), "missing": s.Senses.Missing()}
+	}
+	view["knows_you"] = s.B.KnowsVoice("user")
+	view["knows_her"] = s.B.KnowsVoice("her")
+	view["unknown"] = len(s.B.UnknownGroups())
+	writeJSON(w, 200, view)
+}
+
+// see takes a face the camera followed: a picture to keep (JPEG) and the
+// same face lined up at 112 by 112 for its print.
+func (s *Server) see(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		JPEG    string  `json:"jpeg"`
+		RGB     string  `json:"rgb"`
+		Seconds float64 `json:"seconds"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&in) != nil {
+		fail(w, 400, "send {jpeg, rgb, seconds}")
+		return
+	}
+	jpeg, err1 := base64.StdEncoding.DecodeString(strings.TrimPrefix(in.JPEG, "data:image/jpeg;base64,"))
+	rgb, err2 := base64.StdEncoding.DecodeString(in.RGB)
+	if err1 != nil || err2 != nil || len(rgb) != 112*112*3 || len(jpeg) < 100 {
+		fail(w, 400, "the face pictures were not readable")
+		return
+	}
+	seen, err := s.B.See(r.Context(), jpeg, rgb, in.Seconds)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, seen)
+}
+
+func (s *Server) image(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	img, ok := s.B.S.GetImage(id)
+	if !ok {
+		fail(w, 404, "no such picture")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Type", "image/jpeg")
+	http.ServeFile(w, r, img.Path)
+}
+
+func (s *Server) unknownFaces(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.B.UnknownGroups())
+}
+
+func (s *Server) answerFaces(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	var in brain.FaceAnswer
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in) != nil {
+		fail(w, 400, "say who it is")
+		return
+	}
+	who, err := s.B.AnswerFaces(id, in)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"who": who})
+}
+
+func (s *Server) answerMaybe(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	var in struct {
+		Yes bool `json:"yes"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in) != nil {
+		fail(w, 400, "send {yes}")
+		return
+	}
+	if err := s.B.AnswerMaybe(id, in.Yes); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) getFace(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	f, ok := s.B.S.GetFace(id)
+	if !ok {
+		fail(w, 404, "no such face")
+		return
+	}
+	writeJSON(w, 200, f)
+}
+
+func (s *Server) forgetFace(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	if err := s.B.ForgetFace(id); err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// personFaces lists the pictures of someone; "me" is the user.
+func (s *Server) personFaces(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if r.PathValue("id") == "me" {
+		id, ok = brain.UserID, true
+	}
+	if !ok {
+		fail(w, 400, "bad id")
+		return
+	}
+	faces, err := s.B.S.FacesOf(id)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, faces)
+}
+
+// learnVoice keeps a voiceprint from a recording: "user" is the user
+// reading a few lines, "her" is her own voice as it comes from the
+// speakers.
+func (s *Server) learnVoice(w http.ResponseWriter, r *http.Request) {
+	owner := r.PathValue("owner")
+	if owner != "user" && owner != "her" {
+		fail(w, 400, "a voiceprint is the user's or hers")
+		return
+	}
+	wav, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if owner == "her" && err == nil && len(wav) == 0 {
+		// Her own voice is made here: a few lines in the voice she has now.
+		wav, err = s.herSample(r.Context())
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+	}
+	if err != nil || len(wav) < 1000 {
+		fail(w, 400, "the recording was empty or too long")
+		return
+	}
+	if err := s.B.LearnVoice(r.Context(), owner, wav); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) forgetVoice(w http.ResponseWriter, r *http.Request) {
+	owner := r.PathValue("owner")
+	if owner != "user" && owner != "her" {
+		fail(w, 400, "a voiceprint is the user's or hers")
+		return
+	}
+	s.B.S.ForgetVoice(owner, 0)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// herSample is her voice saying a few lines, for her own voiceprint, so
+// she can tell her voice coming back through the speakers from someone
+// talking.
+func (s *Server) herSample(ctx context.Context) ([]byte, error) {
+	if s.Voice == nil || s.Voice.Missing() != "" {
+		return nil, errors.New("her voice is not set up")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	cfg := s.B.Cfg.Get()
+	line := "Hello, it is " + cfg.CompanionName + ". I was just thinking about what we talked about this morning, and I wanted to ask you something about it when you have a moment."
+	spoken, err := s.Voice.Speak(ctx, line, cfg.Voice, 1)
+	if err != nil {
+		return nil, err
+	}
+	return base64.StdEncoding.DecodeString(spoken.Audio)
 }

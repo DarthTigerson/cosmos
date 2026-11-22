@@ -98,6 +98,9 @@ func (b *Brain) rank(mems []store.Memory, query string, now time.Time, limit int
 	if len(mems) <= limit {
 		return mems
 	}
+	if pinned, rest := splitPinned(mems); len(pinned) > 0 {
+		return withPinned(pinned, b.rank(rest, query, now, max(0, limit-len(pinned))), limit)
+	}
 	qv := b.queryVector(query)
 	if qv == nil {
 		return rankMemories(mems, query, now, limit)

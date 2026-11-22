@@ -46,10 +46,11 @@ func (t *tail) String() string {
 }
 
 type server struct {
-	cmd    *exec.Cmd
-	out    *tail
-	exited bool
-	err    string // why the last start failed, if it did
+	cmd      *exec.Cmd
+	out      *tail
+	exited   bool
+	stopping bool   // killed because she does not need it in her state
+	err      string // why the last start failed, if it did
 }
 
 type Launcher struct {
@@ -58,10 +59,12 @@ type Launcher struct {
 
 	mu      sync.Mutex
 	servers map[string]*server // keyed by base URL
+	busy    map[string]int     // requests in flight, by base URL
+	asleep  bool
 }
 
 func New(cfg *config.Holder, logger *log.Logger) *Launcher {
-	return &Launcher{Cfg: cfg, Log: logger, servers: map[string]*server{}}
+	return &Launcher{Cfg: cfg, Log: logger, servers: map[string]*server{}, busy: map[string]int{}}
 }
 
 func healthURL(base string) (string, *url.URL, error) {
@@ -159,7 +162,7 @@ func ScanModels(dirs []string) []ModelFile {
 
 // Status describes one tier's server for the Models screen.
 type Status struct {
-	State string `json:"state"` // running, starting, stopped, failed, external
+	State string `json:"state"` // running, starting, stopped, resting, failed, external
 	Error string `json:"error,omitempty"`
 	Log   string `json:"log,omitempty"`
 }
@@ -175,6 +178,12 @@ func (l *Launcher) Status(ctx context.Context, tier string) Status {
 	switch {
 	case s == nil && up:
 		return Status{State: "external"}
+	case l.Resting(tier) && (s == nil || s.exited):
+		st := Status{State: "resting"}
+		if s != nil {
+			st.Log = s.out.String()
+		}
+		return st
 	case s == nil:
 		return Status{State: "stopped"}
 	case s.err != "":
@@ -197,6 +206,14 @@ func (l *Launcher) Ensure(ctx context.Context, tier string) error {
 	}
 	if Healthy(ctx, ep.BaseURL) {
 		return nil
+	}
+	if l.Resting(tier) {
+		return errResting
+	}
+	// What she does not need must be gone before anything new loads, or
+	// both would be in memory at once.
+	if err := l.clearResting(ctx); err != nil {
+		return err
 	}
 	s, err := l.spawn(ep, tier)
 	if err != nil {

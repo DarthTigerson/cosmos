@@ -26,8 +26,9 @@ const stepShapes = `{"anyOf":[
  {"type":"object","properties":{"tool":{"const":"calendar.remove"},"id":{"type":"integer"}},"required":["tool","id"]},
  {"type":"object","properties":{"tool":{"const":"web.search"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"web.read"},"url":{"type":"string","maxLength":300}},"required":["tool","url"]},
- {"type":"object","properties":{"tool":{"const":"podcasts.search"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
+ {"type":"object","properties":{"tool":{"const":"podcasts.heard"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"podcasts.listen"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
+ {"type":"object","properties":{"tool":{"const":"podcasts.find"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"lists.add"},"list":{"type":"string","maxLength":40},"items":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"string","maxLength":60}}},"required":["tool","list","items"]},
  {"type":"object","properties":{"tool":{"const":"lists.remove"},"list":{"type":"string","maxLength":40},"items":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"string","maxLength":60}}},"required":["tool","list","items"]},
  {"type":"object","properties":{"tool":{"const":"lists.show"},"list":{"type":"string","maxLength":40}},"required":["tool","list"]},
@@ -127,6 +128,17 @@ var podThinkSchema = json.RawMessage(`{"type":"object","properties":{
  "thoughts":{"type":"array","maxItems":3,"items":{"type":"string","maxLength":300}},
  "share":{"type":"string","maxLength":260}},
  "required":["summary","takeaways","thoughts","share"]}`)
+
+var bookDigestSchema = json.RawMessage(`{"type":"object","properties":{
+ "digest":{"type":"string","maxLength":600},
+ "learned":{"type":"array","maxItems":6,"items":{"type":"string","maxLength":300}}},
+ "required":["digest","learned"]}`)
+
+var bookThinkSchema = json.RawMessage(`{"type":"object","properties":{
+ "summary":{"type":"string","maxLength":600},
+ "thoughts":{"type":"array","maxItems":3,"items":{"type":"string","maxLength":300}},
+ "share":{"type":"string","maxLength":260}},
+ "required":["summary","thoughts","share"]}`)
 
 var titleSchema = json.RawMessage(`{"type":"object","properties":{
  "title":{"type":"string","maxLength":48}},

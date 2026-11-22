@@ -164,3 +164,24 @@ func TestOlderEpisodeOnlyWhenAskedFor(t *testing.T) {
 		t.Error("an episode that does not exist cannot be queued")
 	}
 }
+
+func TestUnqueueSendsAnEpisodeBackToWaiting(t *testing.T) {
+	r := newRig(t)
+	feed, _ := r.b.S.AddFeed("https://example.org/feed", r.now)
+	_, eps, _ := parseFeed(strings.NewReader(testFeed))
+	r.b.PodDir = t.TempDir()
+	r.b.applyFeed(context.Background(), &feed, feed, eps, true)
+	if v := r.b.Podcasts(); v.Unheard[feed.ID] != 1 || len(v.Queued) != 1 {
+		t.Fatalf("one episode queued, the other unheard: %+v", v)
+	}
+	queued, _ := r.b.S.Episodes(0, 10, "queued")
+	if err := r.b.UnqueueEpisode(queued[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if v := r.b.Podcasts(); v.Unheard[feed.ID] != 2 || len(v.Queued) != 0 {
+		t.Fatalf("an unqueued episode waits again: %+v", v)
+	}
+	if err := r.b.UnqueueEpisode(queued[0].ID); err == nil {
+		t.Error("only a queued episode can be taken out of the queue")
+	}
+}

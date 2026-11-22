@@ -1,0 +1,3 @@
+# Voice check clips: made by the check, or recordings of real people.
+*.wav
+results.txt

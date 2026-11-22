@@ -45,26 +45,24 @@ export function VoicePicker() {
   }
 
   return (
-    <section className="settings">
-      <fieldset>
-        <legend>The sound of her voice</legend>
-        <p className="note">Used when you talk to her. It is made on this computer; nothing is sent anywhere.</p>
-        <Problem message={error || problem} />
-        {data?.missing && <Problem message={`Her own voice is not ready (${data.missing}), so she uses the computer's built-in one.`} />}
-        <ul className="voices" role="radiogroup" aria-label="Her voice">
-          {(data?.voices ?? []).map((v) => (
-            <li key={v.id}>
-              <button type="button" role="radio" aria-checked={data?.current === v.id} className="file" onClick={() => void choose(v.id)}>
-                <i aria-hidden="true" />
-                <span className="file-name">{v.label}</span>
-              </button>
-              <button type="button" className="secondary" disabled={!!data?.missing} onClick={() => void hear(v.id)}>
-                {playing === v.id ? 'Playing…' : 'Hear it'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </fieldset>
-    </section>
+    <div className="set-voices">
+      <span className="label">Sound</span>
+      <Problem message={error || problem} />
+      {data?.missing && <Problem message={`Her own voice is not ready (${data.missing}), so she uses the computer's built-in one.`} />}
+      <ul className="voices" role="radiogroup" aria-label="Her voice">
+        {(data?.voices ?? []).map((v) => (
+          <li key={v.id}>
+            <button type="button" role="radio" aria-checked={data?.current === v.id} className="file" onClick={() => void choose(v.id)}>
+              <i aria-hidden="true" />
+              <span className="file-name">{v.label}</span>
+            </button>
+            <button type="button" className="secondary" disabled={!!data?.missing} onClick={() => void hear(v.id)}>
+              {playing === v.id ? 'Playing…' : 'Hear it'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="note">Used when you talk to her, and applies as soon as you pick one. It is made on this computer; nothing is sent anywhere.</p>
+    </div>
   )
 }

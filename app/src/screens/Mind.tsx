@@ -146,7 +146,7 @@ export function Mind() {
   )
 
   return (
-    <Screen eyebrow={longDate(new Date())} title="Mind">
+    <Screen eyebrow={longDate(new Date())} title="Mind" className="pinned">
       <Problem message={error} />
 
       <section className="now" aria-label="Right now">

@@ -5,6 +5,8 @@ export interface Mood {
   energy: number
   confidence: number
   feeling: string
+  // When the feeling came, RFC 3339.
+  feeling_at?: string
 }
 
 export interface State {
@@ -26,6 +28,41 @@ export interface EventMeta {
   intensity?: number
   touches?: string
   about?: string
+  // A picture that goes with it, and what answering it settles.
+  image_id?: number
+  subject?: string
+}
+
+// One sighting of a face; person_id -1 is the user.
+export interface Face {
+  id: number
+  at: string
+  image_id: number
+  person_id: number
+  group_id: number
+  score: number
+  status: 'confirmed' | 'known' | 'maybe' | 'unknown'
+  seconds: number
+}
+
+// Someone seen but not known yet: every sighting and the best picture.
+export interface UnknownGroup {
+  id: number
+  faces: Face[]
+  cover: number
+  seen: number
+  seconds: number
+  last: string
+}
+
+// Which of her senses are set up.
+export interface Senses {
+  faces: boolean
+  voices: boolean
+  missing: string[]
+  knows_you: boolean
+  knows_her: boolean
+  unknown: number
 }
 
 export interface StreamEvent {
@@ -67,7 +104,7 @@ export interface KeptSession extends Session {
 
 export interface Step {
   name: string
-  tier: 'main' | 'worker' | 'tool' | 'code'
+  tier: 'main' | 'worker' | 'tool' | 'code' | 'voice'
   ok: boolean
   ms: number
   note?: string
@@ -126,8 +163,16 @@ export interface Memory {
   content: string
   importance: number
   created_at: string
+  last_used_at: string
+  archived: boolean
   source: string
-  replaced?: string
+  history?: Past[]
+}
+
+// One wording a memory used to have, and when she learned it.
+export interface Past {
+  content: string
+  since: string
 }
 
 export interface Voice {
@@ -177,13 +222,30 @@ export interface Person {
   closeness: number
   notes: string
   last_mentioned: string
+  // Fields the user set by hand: "name", "relationship", "aliases", "closeness".
+  locked: string[]
+  // For someone she cannot place yet: the last thing you said about them.
+  heard?: string
+}
+
+export interface Connection {
+  id: number
+  name: string
+  relationship: string
+  shared: number
 }
 
 export interface PersonDetail {
   person: Person
   memories: Memory[]
   moments: StreamEvent[]
+  mentions: number
+  weeks: number[]
+  connections: Connection[]
   user: string
+  companion: string
+  faces: Face[]
+  voice: boolean
 }
 
 export interface Feed {
@@ -225,6 +287,46 @@ export interface PodcastsView {
   done: Episode[]
   failed: Episode[]
   listened: Record<string, number>
+  // Episodes of each show she has not taken on, by show id.
+  unheard: Record<string, number>
+}
+
+export type BookChapter = { n: number; title: string; words: number; parts: number; notes: string[]; digest: string; learned: string[] }
+
+export type Book = {
+  id: number
+  title: string
+  author: string
+  kind: 'fiction' | 'nonfiction'
+  has_cover: boolean
+  added_at: string
+  started_at: string
+  finished_at: string
+  status: 'waiting' | 'queued' | 'opening' | 'reading' | 'digesting' | 'thinking' | 'done' | 'failed'
+  // "chapter 4 of 7 · part 51 of 116" while reading, "chapter 3 of 7" while digesting.
+  stage_note: string
+  error: string
+  words: number
+  parts: number
+  // Parts read so far.
+  part: number
+  summary: string
+  thoughts: string[]
+  share: string
+  chapters: BookChapter[]
+  // Read, or being read, during her sleep.
+  asleep: boolean
+}
+
+export type BooksView = {
+  enabled: boolean
+  // There is a current book but she is waiting because you are talking.
+  paused: boolean
+  books: Book[]
+  current: Book | null
+  queued: Book[]
+  done: Book[]
+  failed: Book[]
 }
 
 export interface ListItem {
@@ -264,6 +366,19 @@ export interface Endpoint {
 export interface Config {
   user_name: string
   companion_name: string
+  platform_name: string
+  hear_model: string
+  hear_language: string
+  name_sounds_like: string[] | null
+  listen_window: number
+  hear_pause: number
+  room_minutes: number
+  remember_faces: boolean
+  answer_others: boolean
+  unknown_face_days: number
+  face_sure: number
+  face_maybe: number
+  voice_sure: number
   location: string
   main: Endpoint
   worker: Endpoint
@@ -289,7 +404,7 @@ export interface TierView {
   tier: TierName
   endpoint: Endpoint
   shared_with?: string
-  status: { state: 'running' | 'starting' | 'stopped' | 'failed' | 'external'; error?: string; log?: string }
+  status: { state: 'running' | 'starting' | 'stopped' | 'resting' | 'failed' | 'external'; error?: string; log?: string }
 }
 
 export interface ModelFile {
@@ -306,7 +421,7 @@ export interface ModelsView {
 }
 
 export interface Signal {
-  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'writing'
+  kind: 'step' | 'message' | 'mood' | 'state' | 'proposals' | 'sleep' | 'sessions' | 'lists' | 'podcasts' | 'books' | 'writing' | 'memories' | 'people' | 'interrupted'
   data: unknown
 }
 
@@ -316,4 +431,26 @@ export interface StepSignal {
   state: 'running' | 'done'
   ok?: boolean
   ms?: number
+}
+
+// The Mac itself, read by the Electron shell (electron/system.cjs).
+export interface MemoryUsage {
+  usedBytes: number
+  totalBytes: number
+  swapUsedBytes: number
+  compressedBytes: number
+  pressure: 'normal' | 'warn' | 'critical'
+}
+
+export interface MemoryBreakdown {
+  appBytes: number
+  coreBytes: number
+  models: { port: number; bytes: number }[]
+}
+
+export interface BatteryStatus {
+  percent: number
+  charging: boolean
+  pluggedIn: boolean
+  minutesLeft: number | null
 }

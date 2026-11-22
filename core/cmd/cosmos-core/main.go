@@ -1,4 +1,4 @@
-// cosmos-core is Nova's mind as a single local process. The Electron app
+// cosmos-core is the companion's mind as a single local process. The Electron app
 // starts it and talks to it over HTTP; it also runs on its own.
 package main
 
@@ -77,12 +77,14 @@ func main() {
 	launch := launcher.New(cfg, logger)
 	defer launch.StopAll()
 	client := llm.NewHTTP(cfg)
-	client.Prepare = launch.Ensure
+	client.Prepare = launch.Acquire
 
 	b := brain.New(s, client, cfg)
 	b.Log = logger
+	b.Rest = launch.Rest
 	b.E = client
 	b.PodDir = filepath.Join(*data, "podcasts")
+	b.BookDir = filepath.Join(*data, "books")
 	b.MCP = mcp.NewManager()
 	// Her connections start beside everything else: a slow or broken
 	// server must not hold up waking.
@@ -120,7 +122,14 @@ func main() {
 	home, _ := os.UserHomeDir()
 	speaker := &voice.Manager{Dir: filepath.Join(*data, "voice"), ModelDir: filepath.Join(home, "models", "kokoro")}
 	defer speaker.Stop()
-	srv := &http.Server{Handler: (&api.Server{B: b, Token: token, Launch: launch, ModelDirs: modelDirs, Voice: speaker}).Handler()}
+	hearing := &voice.Hearing{}
+	defer hearing.Stop()
+	// Faces and voices are printed by a helper in her voice's Python
+	// environment; the pictures she keeps go in the data folder.
+	senses := voice.DefaultSenses(speaker.Dir)
+	defer senses.Stop()
+	b.Senses, b.SightDir = senses, filepath.Join(*data, "sight")
+	srv := &http.Server{Handler: (&api.Server{B: b, Token: token, Launch: launch, ModelDirs: modelDirs, Voice: speaker, Hearing: hearing, Senses: senses}).Handler()}
 	fmt.Printf("listening on http://%s\n", ln.Addr())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

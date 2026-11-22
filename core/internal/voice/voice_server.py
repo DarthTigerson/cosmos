@@ -9,6 +9,7 @@ how long it lasts, so her mouth can form the sounds as they are heard.
 import base64
 import io
 import json
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -42,10 +43,18 @@ def pieces(text):
     return out
 
 
+# The quiet the model puts before a sentence, kept down to this: the
+# rest is only a wait before she is heard.
+LEAD = 0.05
+
+
 def speak_timed(text, voice, speed, lang):
     """Sound, and a list of [start, length, sound] for every speech sound."""
     style_all = kokoro.get_voice_style(voice)
     audio, marks, at = [], [], 0.0
+    # Three dots make the timing model give nothing but quiet for the
+    # whole sentence; the single character is read as the pause it is.
+    text = re.sub(r"\.{2,}", "…", text)
     for piece in pieces(text):
         sounds = [c for c in kokoro.tokenizer.phonemize(piece, lang) if c in vocab][:LIMIT]
         if not sounds:
@@ -60,7 +69,10 @@ def speak_timed(text, voice, speed, lang):
         total = float(dur.sum())
         # Seconds per unit of the model's own timing.
         unit = (len(wave) / RATE) / total if total > 0 else 0.025
-        t = at + float(dur[0]) * unit
+        lead = float(dur[0]) * unit
+        cut = max(0.0, lead - LEAD)
+        wave = wave[int(cut * RATE):]
+        t = at + lead - cut
         for sound, d in zip(sounds, dur[1:-1]):
             length = float(d) * unit
             marks.append([round(t, 3), round(length, 3), sound])

@@ -41,12 +41,20 @@ func (b *Brain) shouldSleep(cfg config.Config, now time.Time) bool {
 
 // Sleep runs a sleep now, whatever the hour.
 func (b *Brain) Sleep(ctx context.Context) (SleepReport, error) {
+	// The day's last reply is filed before she sleeps on it.
+	b.after.Lock()
+	defer b.after.Unlock()
 	b.turn.Lock()
 	defer b.turn.Unlock()
 	return b.sleepLocked(ctx)
 }
 
 func (b *Brain) wake(now time.Time) {
+	if b.Rest != nil {
+		if err := b.Rest(context.Background(), false); err != nil {
+			b.Log.Printf("sleep: resting the sleeper model: %v", err)
+		}
+	}
 	b.S.Set("state", "awake")
 	b.S.Set("awake_since", now.Format(time.RFC3339))
 	b.Bus.Publish("state", "awake")
@@ -113,6 +121,9 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 		}
 	}
 	finish := func() {
+		// Faces she saw and does not know become questions for the
+		// morning; pictures of strangers kept too long are let go.
+		b.faceQuestions(now)
 		// What she has slept on leaves the list of open sessions.
 		b.closeSessions(ctx, now)
 		b.S.Set("last_sleep_at", now.Format(time.RFC3339))
@@ -139,6 +150,12 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 
 	b.S.Set("state", "asleep")
 	b.Bus.Publish("state", "asleep")
+	// The waking models make room for the sleeper before it loads.
+	if b.Rest != nil {
+		if err := b.Rest(ctx, true); err != nil {
+			b.Log.Printf("sleep: resting the waking models: %v", err)
+		}
+	}
 
 	// ----- a second look -----
 	// Memory capture runs once, in passing, after each reply, and a small
@@ -302,6 +319,10 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 			}
 		}
 	}
+
+	// ----- read -----
+	// The sleeper is loaded and the night is quiet: a good time to read.
+	b.readAsleep(ctx)
 
 	// ----- tidy -----
 	report.Tidied = b.tidy(ctx, cfg, now)

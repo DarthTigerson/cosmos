@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,8 @@ func newRig(t *testing.T) *rig {
 	cfg, _ := config.Load("")
 	c := cfg.Get()
 	c.Location = "Lisbon"
+	// The tests were written with these names; nothing else assumes them.
+	c.UserName, c.CompanionName = "Thomas", "Nova"
 	cfg.Set(c)
 	r := &rig{now: time.Date(2026, 11, 20, 9, 0, 0, 0, time.Local)}
 	r.fake = &llm.Fake{Handlers: map[string]func(llm.Request) (string, error){
@@ -393,6 +396,40 @@ func TestMemoriesKeepTheirSourceAndTheirHistory(t *testing.T) {
 	}
 }
 
+func TestHistoryKeepsEveryEarlierWording(t *testing.T) {
+	r := newRig(t)
+	a, _ := r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas lives in Munich.", CreatedAt: r.now.Add(-48 * time.Hour)})
+	b, _ := r.b.S.Supersede(a.ID, store.Memory{Kind: "fact", Content: "Thomas lives in Berlin.", CreatedAt: r.now.Add(-24 * time.Hour)})
+	c, _ := r.b.S.Supersede(b.ID, store.Memory{Kind: "fact", Content: "Thomas lives in Lisbon.", CreatedAt: r.now})
+	history, _ := r.b.S.Histories()
+	got := history[c.ID]
+	if len(got) != 2 || got[0].Content != "Thomas lives in Berlin." || got[1].Content != "Thomas lives in Munich." {
+		t.Fatalf("every earlier wording should be kept, newest first: %+v", got)
+	}
+	// Replaced memories are history, not forgotten.
+	r.b.S.SetMemoryArchived(c.ID, true)
+	forgotten, _ := r.b.S.ForgottenMemories()
+	if len(forgotten) != 1 || forgotten[0].ID != c.ID {
+		t.Fatalf("only the memory put away should be forgotten: %+v", forgotten)
+	}
+}
+
+func TestPinnedMemoriesAreAlwaysRecalled(t *testing.T) {
+	r := newRig(t)
+	mems := []store.Memory{}
+	for i := range 30 {
+		m, _ := r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas likes coffee number " + string(rune('A'+i)) + ".", CreatedAt: r.now.Add(time.Duration(i) * time.Minute)})
+		mems = append(mems, m)
+	}
+	pin, _ := r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas has hay fever in spring.", Importance: store.Pinned, CreatedAt: r.now.Add(-time.Hour)})
+	mems = append(mems, pin)
+	for _, picked := range [][]store.Memory{rankMemories(mems, "coffee", r.now, 5), r.b.rank(mems, "coffee", r.now, 5)} {
+		if len(picked) != 5 || picked[0].ID != pin.ID {
+			t.Fatalf("a pinned memory should always be recalled, oldest first: %+v", picked)
+		}
+	}
+}
+
 func TestRestatingAFactLeavesNoHistory(t *testing.T) {
 	r := newRig(t)
 	r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Thomas lives in Berlin.", CreatedAt: r.now})
@@ -733,7 +770,7 @@ func TestUnsupportedNumbers(t *testing.T) {
 }
 
 func TestGate(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	day := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
 	night := time.Date(2026, 11, 20, 23, 30, 0, 0, time.UTC)
 	if why := gate(cfg, day, "followup", time.Time{}, 0); why != "" {
@@ -892,7 +929,7 @@ func TestDraftThatCopiesThePromptIsRejected(t *testing.T) {
 }
 
 func TestHistoryAlternatesAndStartsWithTheUser(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	msgs := history(cfg, []store.Event{
 		{Kind: "initiative", Text: "Did you call the dentist?"},
 		{Kind: "user_msg", Text: "Not yet."},
@@ -1384,6 +1421,7 @@ func TestMentionedPlanIsNotAdded(t *testing.T) {
 
 type fakeWeb struct {
 	results []WebResult
+	shows   []PodcastShow
 	asked   []string
 }
 
@@ -1395,6 +1433,77 @@ func (f *fakeWeb) Search(_ context.Context, q string) ([]WebResult, error) {
 func (f *fakeWeb) Read(_ context.Context, address string) (WebPage, error) {
 	f.asked = append(f.asked, address)
 	return WebPage{Title: "A page", URL: address, Text: "Some text."}, nil
+}
+
+func (f *fakeWeb) Podcasts(_ context.Context, name string) ([]PodcastShow, error) {
+	f.asked = append(f.asked, name)
+	return f.shows, nil
+}
+
+func TestPodcastFeedTurn(t *testing.T) {
+	r := newRig(t)
+	web := &fakeWeb{shows: []PodcastShow{{Name: "The WAN Show", By: "Linus Tech Tips", Feed: "https://feeds.megaphone.fm/LMG3928170156", Episodes: 414}}}
+	r.b.Web = web
+	r.fake.Handlers["route"] = func(q llm.Request) (string, error) {
+		return `{"intent":"podcasts","mode":"once","steps":[{"tool":"podcasts.find","query":"WAN Show"}]}`, nil
+	}
+	writes := 0
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		writes++
+		if !strings.Contains(q.Messages[len(q.Messages)-1].Content, "https://feeds.megaphone.fm/LMG3928170156") {
+			t.Errorf("the writer was not given the feed: %s", q.Messages[len(q.Messages)-1].Content)
+		}
+		if writes == 1 {
+			return "Here it is: https://www.youtube.com/feeds/videos.xml?channel_id=UCmadeup.", nil
+		}
+		return "Here it is: https://feeds.megaphone.fm/LMG3928170156.", nil
+	}
+	reply, err := r.say("can you find the rss feed for the wan show?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writes != 2 || !strings.Contains(reply.Text, "LMG3928170156") || strings.Contains(reply.Text, "UCmadeup") {
+		t.Fatalf("a made-up address must be sent back and the real one given: %d writes, %q", writes, reply.Text)
+	}
+	if len(web.asked) != 1 || web.asked[0] != "WAN Show" {
+		t.Fatalf("asked = %v", web.asked)
+	}
+}
+
+func TestSearchingHeardForAShowLooksItUp(t *testing.T) {
+	r := newRig(t)
+	web := &fakeWeb{shows: []PodcastShow{{Name: "The WAN Show", By: "Linus Tech Tips", Feed: "https://feeds.megaphone.fm/LMG3928170156"}}}
+	r.b.Web = web
+	// The planner reads "search for the podcast" as a look through what
+	// she has heard.
+	r.fake.Handlers["route"] = func(q llm.Request) (string, error) {
+		return `{"intent":"podcasts","mode":"once","steps":[{"tool":"podcasts.heard","query":"WAN Show"}]}`, nil
+	}
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		if !strings.Contains(q.Messages[len(q.Messages)-1].Content, "https://feeds.megaphone.fm/LMG3928170156") {
+			t.Errorf("the writer was not given the directory's answer: %s", q.Messages[len(q.Messages)-1].Content)
+		}
+		return "Found it: https://feeds.megaphone.fm/LMG3928170156", nil
+	}
+	if _, err := r.say("search for the podcast the wan show"); err != nil {
+		t.Fatal(err)
+	}
+	if len(web.asked) != 1 || web.asked[0] != "WAN Show" {
+		t.Fatalf("asked = %v", web.asked)
+	}
+}
+
+func TestMadeUpLinksAreFound(t *testing.T) {
+	facts := `{"feed":"https://example.org/feed.xml?a=1&b=2","page":"https://example.com/news/"}`
+	if bad := unsupportedLinks("It is https://example.org/feed.xml?a=1&b=2. Or see (https://example.com/news).", facts); len(bad) != 0 {
+		t.Errorf("addresses from the facts were flagged: %v", bad)
+	}
+	if bad := unsupportedLinks("Try https://example.org/feed2.xml, it should work.", facts); len(bad) != 1 || bad[0] != "https://example.org/feed2.xml" {
+		t.Errorf("a made-up address was not flagged: %v", bad)
+	}
+	if got := factsText([]Fact{{Tool: "web.read", Result: map[string]any{"url": "https://e.org/?a=1&b=2"}}}); !strings.Contains(got, "a=1&b=2") {
+		t.Errorf("an & in an address must stay as it is: %s", got)
+	}
 }
 
 func TestWebSearchTurn(t *testing.T) {
@@ -1484,6 +1593,81 @@ func TestReadPage(t *testing.T) {
 	}
 }
 
+func TestReadPageKeepsLinksAndFeeds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, `<html><head><title>The Show</title>
+		<link rel="alternate" type="application/rss+xml" title="Episodes" href="/episodes.rss"></head><body>
+		<main><p>Every week we talk about tech news, and you can <a href="https://example.com/listen?x=1&amp;y=2">listen on our site</a> any time.</p>
+		<ul><li><a href="/subscribe">Subscribe</a></li><li><a href="#top">Top</a></li></ul></main>
+		<footer><a href="https://feeds.example.net/show">RSS</a> <a href="https://player.example/subscribe?url=https://feeds.example.net/show">Player RSS</a></footer></body></html>`)
+	}))
+	defer srv.Close()
+	page, err := (&DuckDuckGo{AllowLocal: true}).Read(context.Background(), srv.URL+"/show/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"listen on our site (https://example.com/listen?x=1&y=2)", "Subscribe (" + srv.URL + "/subscribe)"} {
+		if !strings.Contains(page.Text, want) {
+			t.Errorf("the text should hold %q:\n%s", want, page.Text)
+		}
+	}
+	if strings.Contains(page.Text, "Top") {
+		t.Errorf("a link to the same page is not worth keeping:\n%s", page.Text)
+	}
+	if len(page.Feeds) != 2 || page.Feeds[0] != srv.URL+"/episodes.rss" || page.Feeds[1] != "https://feeds.example.net/show" {
+		t.Errorf("feeds = %v", page.Feeds)
+	}
+}
+
+func TestReadFeeds(t *testing.T) {
+	atom := `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Linus Tech Tips</title>
+	<entry><title>New  video</title><link rel="alternate" href="https://www.youtube.com/watch?v=abc"/><published>2026-11-20T18:00:00+00:00</published></entry></feed>`
+	rss := `<?xml version="1.0"?><rss version="2.0"><channel><title>The WAN Show</title>
+	<item><title>Episode 1</title><link>https://example.com/1</link><pubDate>Fri, 20 Nov 2026 22:00:00 GMT</pubDate></item></channel></rss>`
+	for _, c := range []struct{ kind, body, title, line string }{
+		{"text/xml; charset=UTF-8", atom, "Linus Tech Tips", "- 2026-11-20: New video (https://www.youtube.com/watch?v=abc)"},
+		{"application/rss+xml", rss, "The WAN Show", "- 2026-11-20: Episode 1 (https://example.com/1)"},
+		{"text/html", rss, "The WAN Show", "Episode 1"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", c.kind)
+			io.WriteString(w, c.body)
+		}))
+		page, err := (&DuckDuckGo{AllowLocal: true}).Read(context.Background(), srv.URL)
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", c.kind, err)
+		}
+		if !page.IsFeed || page.Title != c.title || !strings.Contains(page.Text, "working feed.") || !strings.Contains(page.Text, c.line) {
+			t.Errorf("%s: page = %+v", c.kind, page)
+		}
+	}
+}
+
+func TestPodcastDirectory(t *testing.T) {
+	var asked url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = r.URL.Query()
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		io.WriteString(w, `{"resultCount":2,"results":[
+		{"collectionName":"The WAN Show","artistName":"Linus Tech Tips","feedUrl":"https://feeds.megaphone.fm/LMG3928170156","trackCount":414,"releaseDate":"2026-11-21T05:30:00Z","primaryGenreName":"Tech News"},
+		{"collectionName":"No feed here","artistName":"Someone"}]}`)
+	}))
+	defer srv.Close()
+	shows, err := (&DuckDuckGo{AllowLocal: true, Directory: srv.URL}).Podcasts(context.Background(), "wan show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked.Get("term") != "wan show" || asked.Get("media") != "podcast" {
+		t.Errorf("asked = %v", asked)
+	}
+	want := PodcastShow{Name: "The WAN Show", By: "Linus Tech Tips", Feed: "https://feeds.megaphone.fm/LMG3928170156", Episodes: 414, Latest: "2026-11-21", Genre: "Tech News"}
+	if len(shows) != 1 || shows[0] != want {
+		t.Errorf("shows = %+v", shows)
+	}
+}
+
 func TestAnotherWordForTheSameRelationIsNotInvented(t *testing.T) {
 	told := "Thomas's child Atreus is 7 months old. Thomas's wife is Bethany."
 	if w := unsupportedClaim("You have a seven-month-old baby named Atreus.", told); w != "" {
@@ -1495,14 +1679,14 @@ func TestAnotherWordForTheSameRelationIsNotInvented(t *testing.T) {
 }
 
 func TestBracketedAsidesAreCut(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	if got := cleanDraft(cfg, "Night night, Thomas. [Goodbye for now.]"); got != "Night night, Thomas." {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestNotesAfterAReplyAreCut(t *testing.T) {
-	got := cleanDraft(config.Default(), "See you later.\n\nNOTES TO SELF (Thomas cannot see them):\nHe is leaving.")
+	got := cleanDraft(testConfig(), "See you later.\n\nNOTES TO SELF (Thomas cannot see them):\nHe is leaving.")
 	if got != "See you later." {
 		t.Errorf("got %q", got)
 	}
@@ -1766,7 +1950,7 @@ func TestSheNoticesALongGap(t *testing.T) {
 }
 
 func TestSurenessAndFeedback(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	if l, b := sureness(cfg, []Fact{{Tool: "web.search", Result: 1}}, true); l != "fairly" || b != "looked it up online" {
 		t.Errorf("web: %q %q", l, b)
 	}
@@ -1855,6 +2039,240 @@ func TestSheAsksEvenAfterAQuestionOfHerOwn(t *testing.T) {
 	for _, n := range r.b.Nicknames() {
 		if n.Name == "Boo" && n.For != "Bethany" {
 			t.Fatalf("the answer should settle whose name it is: %+v", n)
+		}
+	}
+}
+
+func TestNamesMatchAsWholeWords(t *testing.T) {
+	names := PersonNames(store.Person{Name: "Tom Bonnici", Aliases: []string{"Tommy"}})
+	for text, want := range map[string]bool{
+		"I'll see you tomorrow.":    false,
+		"Tom's bike is broken.":     true,
+		"Tommy came over.":          true,
+		"Bonnici family dinner.":    false,
+		"we linked the two topics.": false,
+	} {
+		if got := Mentions(text, names); got != want {
+			t.Errorf("Mentions(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestWhatTheUserSetIsNotOverwritten(t *testing.T) {
+	r := newRig(t)
+	p, _ := r.b.S.SavePerson(store.Person{Name: "Bethany", Closeness: 0.3}, r.now)
+	rel := "friend"
+	if _, err := r.b.EditPerson(p.ID, PersonEdit{Relationship: &rel}); err != nil {
+		t.Fatal(err)
+	}
+	r.fake.Handlers["capture"] = func(llm.Request) (string, error) {
+		return `{"changes":[],"people":[{"name":"Bethany","relationship":"wife","note":"Works nights."}]}`, nil
+	}
+	if _, err := r.say("My wife Bethany works nights."); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := r.b.S.FindPerson("bethany")
+	if got.Relationship != "friend" || got.Closeness != 0.7 || !strings.Contains(got.Notes, "Works nights.") {
+		t.Fatalf("a relationship the user set should stand, notes still grow: %+v", got)
+	}
+}
+
+func TestMergingKeepsNamesNotesAndRelationship(t *testing.T) {
+	r := newRig(t)
+	beth, _ := r.b.S.SavePerson(store.Person{Name: "Beth", Notes: "Says hi.", Closeness: 0.3}, r.now)
+	bethany, _ := r.b.S.SavePerson(store.Person{Name: "Bethany", Relationship: "wife", Closeness: 0.9, Notes: "Works nights."}, r.now)
+	into, err := r.b.MergePerson(beth.ID, bethany.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	people, _ := r.b.S.People()
+	if len(people) != 1 || into.Relationship != "wife" || len(into.Aliases) != 1 || into.Aliases[0] != "Beth" || into.Notes != "Works nights.\nSays hi." {
+		t.Fatalf("the duplicate should fold into the real person: %+v %+v", into, people)
+	}
+}
+
+func TestAForgottenPersonStaysForgotten(t *testing.T) {
+	r := newRig(t)
+	p, _ := r.b.S.SavePerson(store.Person{Name: "Rex", Closeness: 0.3}, r.now)
+	if err := r.b.ForgetPerson(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	r.fake.Handlers["capture"] = func(llm.Request) (string, error) {
+		return `{"changes":[],"people":[{"name":"Rex","relationship":"","note":"Barks at night."}]}`, nil
+	}
+	if _, err := r.say("Rex kept me up all night."); err != nil {
+		t.Fatal(err)
+	}
+	if people, _ := r.b.S.People(); len(people) != 0 {
+		t.Fatalf("a forgotten person should not come back: %+v", people)
+	}
+}
+
+func TestPersonViewCountsMentionsAndConnections(t *testing.T) {
+	r := newRig(t)
+	link, _ := r.b.S.SavePerson(store.Person{Name: "Link", Relationship: "son", Closeness: 0.9}, r.now)
+	r.b.S.SavePerson(store.Person{Name: "Bethany", Relationship: "wife", Closeness: 0.9}, r.now)
+	r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "Bethany and Link went to the beach.", CreatedAt: r.now})
+	r.b.S.AddMemory(store.Memory{Kind: "fact", Content: "The two topics are linked.", CreatedAt: r.now})
+	r.b.S.AddEvent(store.Event{At: r.now.Add(-time.Hour), Kind: "user_msg", Text: "Link lost a tooth."})
+	r.b.S.AddEvent(store.Event{At: r.now.Add(-20 * 24 * time.Hour), Kind: "user_msg", Text: "Link started school."})
+	r.b.S.AddEvent(store.Event{At: r.now, Kind: "user_msg", Text: "Here is the link to it."})
+	view, err := r.b.Person(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Memories) != 1 || view.Mentions != 2 || view.Weeks[11] != 1 || view.Weeks[9] != 1 {
+		t.Fatalf("only whole-word mentions should count: %+v", view)
+	}
+	if len(view.Connections) != 1 || view.Connections[0].Name != "Bethany" {
+		t.Fatalf("Bethany is named alongside Link: %+v", view.Connections)
+	}
+}
+
+func TestTalkingOverHerStopsTheReply(t *testing.T) {
+	r := newRig(t)
+	r.fake.Handlers["writer"] = func(llm.Request) (string, error) {
+		// The user cuts in while she is still writing.
+		if !r.b.Interrupt() {
+			t.Error("there was a reply to stop")
+		}
+		return "Let me tell you all about it.", nil
+	}
+	_, err := r.say("Tell me about Lisbon")
+	if !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("err = %v, want ErrInterrupted", err)
+	}
+	msgs, _ := r.b.S.SessionEvents(r.b.sessionFor(r.now, "user").ID, 0, "user_msg", "nova_msg")
+	if len(msgs) != 1 || msgs[0].Kind != "user_msg" {
+		t.Fatalf("thread = %+v, want only what the user said", msgs)
+	}
+	if r.b.Interrupt() {
+		t.Error("nothing should be left to stop between turns")
+	}
+	r.fake.Handlers["writer"] = func(llm.Request) (string, error) { return "Sounds good.", nil }
+	if reply, err := r.say("Actually, tell me about Porto"); err != nil || reply.Text == "" {
+		t.Fatalf("the next message was not answered: %v", err)
+	}
+}
+
+// testConfig is the default configuration with the names the tests use.
+func testConfig() config.Config {
+	c := config.Default()
+	c.UserName, c.CompanionName = "Thomas", "Nova"
+	return c
+}
+
+func TestWhatSheOverhearsIsNeverKept(t *testing.T) {
+	r := newRig(t)
+	secret := "the surprise party is on Saturday at Mark's"
+	r.b.Overhear(secret)
+	var notes string
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		notes = q.Messages[len(q.Messages)-1].Content
+		return "Sounds good.", nil
+	}
+	ctx := WithSaid(context.Background(), Said{Aloud: true, Room: r.b.Room()})
+	if _, err := r.b.HandleMessage(ctx, "what do you think of that?"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	if !strings.Contains(notes, secret) {
+		t.Errorf("the reply should be able to see what was just said nearby:\n%s", notes)
+	}
+	if r.b.Room() != "" {
+		t.Error("what was overheard is shown to one reply only")
+	}
+	evs, _ := r.b.S.EventsBetween(r.now.Add(-24*time.Hour), r.now.Add(24*time.Hour))
+	for _, e := range evs {
+		if strings.Contains(e.Text, "surprise party") {
+			t.Errorf("overheard words were stored in a %s event", e.Kind)
+		}
+	}
+	mems, _ := r.b.S.Memories()
+	for _, m := range mems {
+		if strings.Contains(m.Content, "surprise party") {
+			t.Errorf("overheard words became a memory: %q", m.Content)
+		}
+	}
+}
+
+func TestNothingIsOverheardWhenTheRoomIsOff(t *testing.T) {
+	r := newRig(t)
+	c := r.b.Cfg.Get()
+	c.RoomMinutes = 0
+	r.b.Cfg.Set(c)
+	r.b.Overhear("anything at all")
+	if r.b.Room() != "" {
+		t.Error("with the room off nothing is kept")
+	}
+}
+
+func TestAPictureReachesTheWriterOnlyWhenTheModelCanSee(t *testing.T) {
+	r := newRig(t)
+	var got llm.Request
+	r.fake.Handlers["writer"] = func(q llm.Request) (string, error) {
+		got = q
+		return "What a lovely boy.", nil
+	}
+	pic := "data:image/jpeg;base64,AAAA"
+	ctx := WithSaid(context.Background(), Said{Seen: pic})
+	if _, err := r.b.HandleMessage(ctx, "look at my boy"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	last := got.Messages[len(got.Messages)-1]
+	if len(last.Images) != 0 {
+		t.Error("a model with no projector must not be sent a picture")
+	}
+	if !strings.Contains(last.Content, "cannot make out pictures") {
+		t.Errorf("she should be told she cannot see yet:\n%s", last.Content)
+	}
+
+	c := r.b.Cfg.Get()
+	c.MainSees = true
+	r.b.Cfg.Set(c)
+	if _, err := r.b.HandleMessage(ctx, "look at my boy again"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	last = got.Messages[len(got.Messages)-1]
+	if len(last.Images) != 1 || last.Images[0] != pic {
+		t.Fatalf("the picture should go with the newest message, got %v", last.Images)
+	}
+	evs, _ := r.b.S.EventsBetween(r.now.Add(-time.Hour), r.now.Add(time.Hour))
+	for _, e := range evs {
+		if strings.Contains(e.Text, "base64") || strings.Contains(string(e.Meta), "base64") {
+			t.Errorf("the picture was stored in a %s event", e.Kind)
+		}
+	}
+}
+
+// Tools that reach outside (web search, weather, connected servers) are
+// planned by route and run before the writer. A picture goes to the
+// writer only, so nothing from the camera can end up in what they send.
+func TestAPictureNeverReachesThePlanOrTheTools(t *testing.T) {
+	r := newRig(t)
+	c := r.b.Cfg.Get()
+	c.MainSees = true
+	r.b.Cfg.Set(c)
+	pic := "data:image/jpeg;base64,SECRETPIXELS"
+	r.fake.Handlers["writer"] = func(llm.Request) (string, error) { return "I see him.", nil }
+	ctx := WithSaid(context.Background(), Said{Seen: pic})
+	if _, err := r.b.HandleMessage(ctx, "look who this is and search the web for him"); err != nil {
+		t.Fatal(err)
+	}
+	r.b.Wait()
+	for _, q := range r.fake.Calls {
+		if q.Role == "writer" {
+			continue
+		}
+		for _, m := range q.Messages {
+			if len(m.Images) > 0 || strings.Contains(m.Content, "SECRETPIXELS") {
+				t.Errorf("the picture reached the %s step", q.Role)
+			}
+		}
+		if strings.Contains(q.System, "SECRETPIXELS") {
+			t.Errorf("the picture reached the %s step's instructions", q.Role)
 		}
 	}
 }

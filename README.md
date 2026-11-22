@@ -46,15 +46,89 @@ COSMOS_CORE_URL=http://127.0.0.1:7717 COSMOS_TOKEN=choose-a-secret npm start
 
 1. **route** (main model): picks the tools needed and a planning mode.
 2. **tools** (code): weather, calendar, memory and people lookups.
-3. **notice** (main model): how the moment lands on her, judged against her
-   values and the people close to you. This moves her mood and may queue a
-   follow-up.
-4. **writer** (main model): writes the reply in her voice from the facts.
-5. **verify**: code checks every number against the facts; the main model
+3. **writer** (main model): writes the reply in her voice from the facts.
+4. **verify**: code checks every number against the facts; the main model
    checks replies that used tools. A failed check earns one rewrite.
 
 Everything is written to her memory stream as it happens. After the reply,
-a capture step keeps her long-term facts about you up to date.
+in the background: **notice** (worker) judges how the moment landed on her
+against her values and the people close to you, which moves her mood and
+may queue a follow-up; a capture step keeps her long-term facts about you
+up to date. Each background job takes the model on its own and lets a new
+message go first.
+
+**Names.** Her name, your name and the platform's name are settings
+(`companion_name`, `user_name`, `platform_name`), never written into code
+or prompts.
+
+**Talking to her.** The microphone button opens her ears. By default she
+listens for her name: she answers when she hears it, or anything that
+sounds like it ("Also answers to" in Settings adds spellings), and for a
+short while after each reply without it. Talk not meant for her is kept
+for a few minutes in memory only, so a reply she is asked for knows what
+was just said; it is never written to her stream, memories or sleep.
+"Answer everything" turns the name gate off.
+
+While she listens, the app and the core hold one call open (a WebSocket,
+`/api/call`): the microphone goes up as 16 kHz sound, cut on the audio
+thread, and her voice comes back as raw sound with the timing of each
+speech sound. The core does the rest. Silero VAD (on this computer)
+says when someone starts and stops speaking; a pause of `hear_pause`
+seconds (0.9 by default) ends what was said, so a breath does not.
+Speech is written out by `whisper-server` (from `brew install
+whisper-cpp`), kept running while she listens and stopped after 15 idle
+minutes; the model is the first `.bin` in `~/models/whisper` unless
+`hear_model` names one. Her voice is Kokoro, started when the call
+opens. Cutting in stops her only once it is clearly someone speaking,
+not her own voice coming back (and, listening for her name, someone she
+is talking with); words said while she is working are never dropped,
+and cut her current reply short so she answers everything together.
+Without Silero she judges speech by loudness, as before:
+
+```bash
+mkdir -p ~/models/vad
+curl -L -o ~/models/vad/silero_vad.onnx https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
+```
+
+Each spoken reply's steps (in "Last reply") start with how long writing
+out took and end with how soon after you stopped speaking her first
+sentence was ready and first heard.
+
+**Checking her ears.** `cd core && go run ./cmd/voice-check -make` makes
+test clips with her voice model (you, her, other people, a television,
+sound-alikes of her name, noise) and runs them through what a call
+does: speech detection, writing out, her name, whose voice, and whether
+she would answer. It prints what she missed and what she answered that
+she should not have, with timings, and writes `results.txt`. Add your
+own recordings to `core/testdata/voice/clips.json`; the clips stay out
+of git and on this computer.
+
+**Faces and voices.** With her camera on, a face she follows for a moment
+is lined up in the camera worker and turned into a faceprint; a crop is
+kept in `sight/` in her data folder. A face she knows is a sighting of that
+person (once per ten minutes). One she does not know joins others like it,
+and after she sleeps she asks "Who is this?" in the chat with the picture:
+name them, pick someone she knows, say it is you, or have her forget them,
+which deletes the pictures. Strangers' pictures are let go after
+`unknown_face_days`. The People page shows each person's pictures and the
+faces still to answer. Teach her your voice and her own in Settings → Her
+ears. She then ignores her own voice from the speakers and, listening for
+her name, answers only you (unless "Answer others" is on). A voice she does
+not know, heard while one person she knows is in view, becomes theirs.
+Camera, pictures and prints never leave this computer.
+
+Two model files, downloaded once, plus `sherpa-onnx` in her voice's
+environment:
+
+```bash
+mkdir -p ~/models/sight ~/models/speaker
+curl -L -o ~/models/sight/w600k_mbf.onnx https://huggingface.co/deepghs/insightface/resolve/main/buffalo_s/w600k_mbf.onnx
+curl -L -o ~/models/speaker/wespeaker_en_voxceleb_resnet34_LM.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx
+uv pip install --python "$HOME/Library/Application Support/Cosmos/voice/.venv/bin/python" sherpa-onnx
+```
+
+For her to describe what she sees when you ask her to look, pick the main
+model's "Vision projector" in Models and restart it.
 
 **Sessions.** A session is one sitting. Her memories, people, mood and
 intentions carry across all of them; only the thread starts clean. A new

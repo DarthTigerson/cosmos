@@ -29,8 +29,12 @@ type Endpoint struct {
 }
 
 type Config struct {
+	// Names are settings, never written into code or prompts: who the
+	// user is, what the companion is called, and what the platform she
+	// runs on is called.
 	UserName      string `json:"user_name"`
 	CompanionName string `json:"companion_name"`
+	PlatformName  string `json:"platform_name"`
 	Location      string `json:"location"`
 
 	// Main is her voice: it writes replies and checks them against tool
@@ -65,17 +69,58 @@ type Config struct {
 	// Podcasts lets her check the shows she follows and listen to new
 	// episodes on her own.
 	Podcasts bool `json:"podcasts"`
+	// Books lets her read the books the user gives her, while they are
+	// quiet or she is asleep.
+	Books bool `json:"books"`
 	// Voice is the name of the system voice she speaks with. Empty
 	// means the computer's own default.
 	Voice string `json:"voice"`
+	// HearModel is the Whisper model for what the user says aloud; empty
+	// means the first in ~/models/whisper. HearLanguage is the language
+	// they speak, which is quicker and surer than guessing it each time.
+	HearModel    string `json:"hear_model"`
+	HearLanguage string `json:"hear_language"`
+	// When always listening she answers only to her name, or to
+	// anything that sounds like it. NameSoundsLike adds spellings the
+	// recogniser makes of it that are not caught on their own.
+	NameSoundsLike []string `json:"name_sounds_like"`
+	// ListenWindow is how many seconds after her reply she still takes
+	// what is said as meant for her, without her name.
+	ListenWindow int `json:"listen_window"`
+	// HearPause is how many seconds of quiet end what the user is saying.
+	// Shorter pauses, for a breath or a thought, are kept in it.
+	HearPause float64 `json:"hear_pause"`
+	// RoomMinutes is how long what she overhears is kept, in memory
+	// only, for the reply she is next asked for. 0 keeps nothing.
+	RoomMinutes int `json:"room_minutes"`
+	// MainSees marks a main model server started elsewhere as able to
+	// look at pictures. One the core starts sees when it has a projector.
+	MainSees bool `json:"main_sees"`
+	// How alike two prints must be. A face at FaceSure or more is that
+	// person; at FaceMaybe she thinks so and asks; strangers at FaceSame
+	// are taken to be one person. A voice at VoiceSure is that person's.
+	FaceSure  float64 `json:"face_sure"`
+	FaceMaybe float64 `json:"face_maybe"`
+	FaceSame  float64 `json:"face_same"`
+	VoiceSure float64 `json:"voice_sure"`
+	// UnknownFaceDays is how long pictures of strangers are kept unasked
+	// or unanswered.
+	UnknownFaceDays int `json:"unknown_face_days"`
+	// RememberFaces: faces the camera follows are kept and matched to
+	// people. Off, she still looks but keeps nothing.
+	RememberFaces bool `json:"remember_faces"`
+	// AnswerOthers: when someone other than the user says her name, she
+	// answers. Off, she listens and keeps it as what was said nearby.
+	AnswerOthers bool `json:"answer_others"`
 	// MCPServers are the user's own tool servers she may use.
 	MCPServers []mcp.Server `json:"mcp_servers"`
 }
 
 func Default() Config {
 	return Config{
-		UserName:      "Thomas",
-		CompanionName: "Nova",
+		UserName:      "Friend",
+		CompanionName: "Companion",
+		PlatformName:  "Cosmos",
 		Main:          Endpoint{BaseURL: "http://127.0.0.1:8080/v1", Model: "main"},
 		Planning:      "auto",
 		// Off by default: in practice the model rejected correct replies
@@ -91,6 +136,17 @@ func Default() Config {
 		WeatherWatch:     true,
 		WebSearch:        true,
 		Podcasts:         true,
+		Books:            true,
+		HearLanguage:     "en",
+		ListenWindow:     25,
+		HearPause:        0.9,
+		RoomMinutes:      3,
+		FaceSure:         0.45,
+		FaceMaybe:        0.32,
+		FaceSame:         0.40,
+		VoiceSure:        0.62,
+		UnknownFaceDays:  14,
+		RememberFaces:    true,
 	}
 }
 
@@ -111,6 +167,12 @@ func (c Config) Tier(name string) Endpoint {
 		return c.Embed
 	}
 	return c.Main
+}
+
+// Sees says whether the main model can look at pictures: it is started
+// with a vision projector, or the user says the server they run has one.
+func (c Config) Sees() bool {
+	return c.MainSees || (c.Main.Launch != nil && c.Main.Launch.MMProj != "")
 }
 
 // Holder keeps the live config and saves changes to disk.

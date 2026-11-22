@@ -1,11 +1,13 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, type ReactNode, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, useLoad, useSignals } from '../api'
-import { Avatar } from '../avatar/Avatar'
+import { Avatar, type HerView } from '../avatar/Avatar'
+import { asksToLook, glance } from '../avatar/glance'
+import { FaceAsk } from '../faces'
 import { clock, longDate, when } from '../format'
-import { Meters, Problem } from '../parts'
+import { Linked, Meters, Problem } from '../parts'
 import type { Run, State, Step, StepSignal, StreamEvent, Today } from '../types'
 
-const tierLabel: Record<Step['tier'], string> = { main: 'main model', worker: 'worker', tool: 'tool', code: 'check' }
+const tierLabel: Record<Step['tier'], string> = { main: 'main model', worker: 'worker', tool: 'tool', code: 'check', voice: 'voice' }
 
 interface LiveStep {
   name: string
@@ -15,10 +17,130 @@ interface LiveStep {
   ms: number
 }
 
+// The side panel's choices, kept between launches.
+function kept(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+function keep(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Not kept; it still applies for now.
+  }
+}
+
+const views: { view: HerView; label: string; icon: string }[] = [
+  { view: 'full', label: 'Full', icon: 'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM12 6.4a2.6 2.6 0 1 1 0 5.2 2.6 2.6 0 0 1 0-5.2zM8 16.5c.8-2 2.2-3 4-3s3.2 1 4 3' },
+  { view: 'compact', label: 'Compact', icon: 'M7.5 4.5a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM13 6h7M13 9h5M4 14h16M4 18h12' },
+  { view: 'text', label: 'Text', icon: 'M4 6h16M4 10h16M4 14h12M4 18h9' },
+  { view: 'only', label: 'Only her', icon: 'M12 4.9a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2zM5 21c1-4.2 3.6-6.5 7-6.5s6 2.3 7 6.5' },
+]
+
+function firstView(): HerView {
+  const v = kept('cosmos:her-view')
+  if (v && views.some((x) => x.view === v)) return v as HerView
+  // Before the views, hiding her was a yes or no.
+  return kept('cosmos:avatar') === 'false' ? 'text' : 'full'
+}
+
+const RAIL_MIN = 280
+const RAIL_MAX = 560
+const RAIL_USUAL = 356
+// The chat keeps at least this much room when the panel is widened.
+const CHAT_MIN = 420
+
+function firstWidth(): number {
+  const w = Number(kept('cosmos:rail-width'))
+  return w >= RAIL_MIN && w <= RAIL_MAX ? w : RAIL_USUAL
+}
+
+// A section of the side panel that folds. Folded, it still says in one
+// line what is in it.
+function Fold({ id, label, summary, open, children }: { id: string; label: string; summary: string; open?: boolean; children: ReactNode }) {
+  const [isOpen, setOpen] = useState(() => (kept(`cosmos:fold:${id}`) ?? String(open ?? true)) === 'true')
+  const toggle = () => {
+    keep(`cosmos:fold:${id}`, String(!isOpen))
+    setOpen(!isOpen)
+  }
+  return (
+    <section className={isOpen ? 'her-fold open' : 'her-fold'}>
+      <button type="button" className="her-fold-head" aria-expanded={isOpen} onClick={toggle}>
+        <span className="label">{label}</span>
+        <span className="her-fold-sum">{summary}</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M6 3l5 5-5 5" />
+        </svg>
+      </button>
+      {isOpen && <div className="her-fold-body">{children}</div>}
+    </section>
+  )
+}
+
+// The line between the chat and the side panel. Dragging it, or the arrow
+// keys while it has focus, sets the panel's width; a double click resets it.
+function RailGrip({ width, setWidth }: { width: number; setWidth: (w: number) => void }) {
+  const fit = (w: number) => Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, w, window.innerWidth - CHAT_MIN)))
+  const [dragging, setDragging] = useState(false)
+  function down(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const grip = e.currentTarget
+    grip.setPointerCapture(e.pointerId)
+    const startX = e.clientX
+    const start = width
+    setDragging(true)
+    document.body.classList.add('her-resizing')
+    const move = (ev: PointerEvent) => setWidth(fit(start + startX - ev.clientX))
+    const up = () => {
+      setDragging(false)
+      document.body.classList.remove('her-resizing')
+      grip.removeEventListener('pointermove', move)
+      grip.removeEventListener('pointerup', up)
+      grip.removeEventListener('pointercancel', up)
+    }
+    grip.addEventListener('pointermove', move)
+    grip.addEventListener('pointerup', up)
+    grip.addEventListener('pointercancel', up)
+  }
+  return (
+    <div
+      className={dragging ? 'her-grip dragging' : 'her-grip'}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Side panel width"
+      aria-valuemin={RAIL_MIN}
+      aria-valuemax={RAIL_MAX}
+      aria-valuenow={width}
+      tabIndex={0}
+      title="Drag to resize. Double-click to reset."
+      onPointerDown={down}
+      onDoubleClick={() => setWidth(RAIL_USUAL)}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft') setWidth(fit(width + 20))
+        else if (e.key === 'ArrowRight') setWidth(fit(width - 20))
+        else return
+        e.preventDefault()
+      }}
+    >
+      <span />
+    </div>
+  )
+}
+
 export function Nova({ state }: { state: State | null }) {
   const { data, error, reload } = useLoad<Today>('/api/today')
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  const busy = useRef(false)
+  // Words said or typed while she was busy. Nothing is dropped: they go
+  // to her together as soon as she is free.
+  const [waiting, setWaiting] = useState<string[]>([])
+  const queued = useRef<string[]>([])
+  const queuedAloud = useRef(false)
+  const queuedHeard = useRef(0)
   const [sendError, setSendError] = useState('')
   const [live, setLive] = useState<LiveStep[] | null>(null)
   // Her reply as she writes it, before the finished one arrives.
@@ -28,6 +150,18 @@ export function Nova({ state }: { state: State | null }) {
   // The reply whose checks are open in the side panel, if any.
   const [inspect, setInspect] = useState<{ run: Run; at: string } | null>(null)
   const [inspectError, setInspectError] = useState('')
+  const [view, setViewState] = useState<HerView>(firstView)
+  const [details, setDetails] = useState(false)
+  const [width, setWidthState] = useState(firstWidth)
+  const setView = (v: HerView) => {
+    keep('cosmos:her-view', v)
+    setViewState(v)
+    setDetails(false)
+  }
+  const setWidth = (w: number) => {
+    keep('cosmos:rail-width', String(w))
+    setWidthState(w)
+  }
 
   async function showChecks(m: StreamEvent) {
     if (!m.meta?.run_id) return
@@ -74,6 +208,7 @@ export function Nova({ state }: { state: State | null }) {
       if ((s.data as StreamEvent).kind === 'initiative') reload()
     }
     if (s.kind === 'writing') setWriting((s.data as { text: string }).text)
+    if (s.kind === 'interrupted') setWriting('')
     if (s.kind === 'message' || (s.kind === 'step' && (s.data as StepSignal).state === 'running')) setWriting('')
     if (s.kind === 'step') {
       const step = s.data as StepSignal
@@ -99,7 +234,7 @@ export function Nova({ state }: { state: State | null }) {
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' })
-  }, [messages.length, sending, writing])
+  }, [messages.length, sending, writing, waiting.length])
 
   async function send(e: FormEvent) {
     e.preventDefault()
@@ -109,25 +244,98 @@ export function Nova({ state }: { state: State | null }) {
     await say(typed)
   }
 
-  // say sends words to her, typed or spoken.
-  async function say(say: string) {
-    if (!say || sending) return
+  // say sends words to her, typed or spoken. While she is busy they
+  // wait, and everything that waited goes as one message.
+  async function say(say: string, spoken = false, heard = 0) {
+    if (!say) return
+    if (busy.current) {
+      queued.current = [...queued.current, say]
+      queuedAloud.current ||= spoken
+      if (heard) queuedHeard.current = heard
+      setWaiting(queued.current)
+      return
+    }
+    busy.current = true
     setSending(true)
     setSendError('')
-    try {
-      await api('/api/message', { method: 'POST', body: { text: say } })
-    } catch (err) {
-      setSendError((err as Error).message)
-    } finally {
-      setSending(false)
+    let next = say
+    let aloud = spoken
+    // The number the call gave what was said, so its timings go with
+    // the reply.
+    let from = heard
+    while (next) {
+      // Asked to look, she takes one still from her camera, if it is on.
+      const seen = asksToLook(next) ? glance() : null
+      try {
+        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud, ...(seen ? { seen } : {}), ...(from ? { heard: from } : {}) } })
+      } catch (err) {
+        setSendError((err as Error).message)
+      }
       setExtra([])
       reload()
+      next = queued.current.join(' ')
+      aloud = queuedAloud.current
+      from = queuedHeard.current
+      queued.current = []
+      queuedAloud.current = false
+      queuedHeard.current = 0
+      setWaiting([])
     }
+    busy.current = false
+    setSending(false)
   }
 
-  const name = state?.name ?? 'Nova'
+  const name = state?.name ?? 'Companion'
   const current = live?.find((s) => s.running)
   const steps: LiveStep[] = sending && live ? live : (data?.last_run?.steps ?? []).map((s) => ({ ...s, running: false }))
+
+  const mind = data?.intentions ?? []
+  const sidePanelSections = (
+    <>
+      <Fold
+        id="steps"
+        label={sending ? 'This reply' : 'Last reply'}
+        open={false}
+        summary={sending ? 'working…' : steps.length === 0 ? 'none yet' : `${steps.length} steps${data?.last_run ? ` · ${(data.last_run.ms / 1000).toFixed(1)} s` : ''}`}
+      >
+        {steps.length === 0 ? (
+          <p className="quiet">No reply yet.</p>
+        ) : (
+          <ol className="steps">
+            {steps.map((s, i) => (
+              <li key={i} className={s.running ? 'running' : s.ok ? '' : 'failed'}>
+                <span>{s.name}</span>
+                <span className={`tier ${s.tier}`}>
+                  {tierLabel[s.tier]}
+                  {s.running ? ' …' : s.ok ? '' : ' failed'}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+        {!sending && data?.last_run && (
+          <p className="quiet">
+            {(data.last_run.ms / 1000).toFixed(1)} s · planned {data.last_run.mode === 'steps' ? 'step by step' : 'in one go'}
+            {data.last_run.rewrites > 0 && ' · rewritten once'}
+          </p>
+        )}
+      </Fold>
+      <Fold id="mind" label="On her mind" summary={mind.length === 0 ? 'nothing' : `${mind.length} waiting`}>
+        {mind.length === 0 ? (
+          <p className="quiet">Nothing she is waiting to bring up.</p>
+        ) : (
+          <ul className="intentions">
+            {mind.map((i) => (
+              <li key={i.id}>
+                <span>{i.text}</span>
+                <span className="sub">{i.status === 'sent' ? 'asked, waiting for an answer' : `${when(i.trigger_at)} · lets go ${when(i.expires_at)}`}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Fold>
+    </>
+  )
 
   return (
     <div className="split">
@@ -153,15 +361,21 @@ export function Nova({ state }: { state: State | null }) {
           {messages.map((m) =>
             m.kind === 'user_msg' ? (
               <div className="bubble" key={m.id}>
-                {m.text}
+                <Linked text={m.text} />
               </div>
             ) : m.kind === 'initiative' ? (
               <article className="reach" key={m.id}>
                 <span className="who">
                   {name} reached out · {clock(m.at)}
                 </span>
-                <p>{m.text}</p>
-                {m.meta?.reason && <p className="why">Why: {m.meta.reason}</p>}
+                <p>
+                  <Linked text={m.text} />
+                </p>
+                {m.meta?.image_id && m.meta.subject ? (
+                  <FaceAsk subject={m.meta.subject} image={m.meta.image_id} user={state?.user ?? 'you'} />
+                ) : (
+                  m.meta?.reason && <p className="why">Why: {m.meta.reason}</p>
+                )}
               </article>
             ) : (
               <article className="reply" key={m.id}>
@@ -188,7 +402,9 @@ export function Nova({ state }: { state: State | null }) {
                   )}
                 </span>
                 {m.text.split('\n').filter(Boolean).map((line, i) => (
-                  <p key={i}>{line}</p>
+                  <p key={i}>
+                    <Linked text={line} />
+                  </p>
                 ))}
               </article>
             ),
@@ -205,6 +421,11 @@ export function Nova({ state }: { state: State | null }) {
             <p className="thinking" role="status">
               {current ? `${name} is on: ${current.name}` : `${name} is thinking`}
             </p>
+          )}
+          {waiting.length > 0 && (
+            <div className="bubble waiting" role="status" title="Goes to her as soon as she is free">
+              {waiting.join(' ')}
+            </div>
           )}
           <Problem message={sendError || inspectError} />
           <div ref={end} />
@@ -225,14 +446,15 @@ export function Nova({ state }: { state: State | null }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
           />
-          <button type="submit" className="primary" disabled={sending || !text.trim()}>
+          <button type="submit" className="primary" disabled={!text.trim()}>
             Send
           </button>
         </form>
       </main>
 
+      <RailGrip width={width} setWidth={setWidth} />
       {inspect ? (
-        <aside className="rail" aria-label="How this reply was made">
+        <aside className="rail" style={{ flexBasis: width }} aria-label="How this reply was made">
           <section>
             <div className="inspect-head">
               <h2 className="label">Reply at {clock(inspect.at)}</h2>
@@ -272,54 +494,47 @@ export function Nova({ state }: { state: State | null }) {
           </section>
         </aside>
       ) : (
-      <aside className="rail" aria-label={`${name}'s state`}>
-        {state && (
-          <section>
-            <Avatar state={state} working={sending} onSay={(words) => void say(words)} />
-            <Meters mood={state.mood} />
-          </section>
+      <aside className={`rail her-rail her-rail-${view}`} style={{ flexBasis: width }} aria-label={`${name}'s state`}>
+        <div className="her-bar">
+          <span className="label">{name}</span>
+          <div className="her-views" role="group" aria-label={`How to show ${name}`}>
+            {views.map((v) => (
+              <button key={v.view} type="button" aria-pressed={view === v.view} title={v.label} aria-label={v.label} onClick={() => setView(v.view)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d={v.icon} />
+                </svg>
+              </button>
+            ))}
+          </div>
+        </div>
+        {state && <Avatar state={state} working={sending} onSay={(words, spoken, heard) => void say(words, spoken, heard)} view={view} mindCount={data?.intentions.length ?? 0} />}
+        {view === 'only' ? (
+          <>
+            <button type="button" className="her-details-open" aria-expanded={details} onClick={() => setDetails(!details)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h10" />
+              </svg>
+              Details
+            </button>
+            {details && (
+              <div className="her-drawer">
+                <div className="her-drawer-top">
+                  <span className="label">Details</span>
+                  <button type="button" className="linkish" onClick={() => setDetails(false)}>
+                    Close
+                  </button>
+                </div>
+                {state && <Meters mood={state.mood} />}
+                {sidePanelSections}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {state && <Meters mood={state.mood} row={view === 'compact'} />}
+            {sidePanelSections}
+          </>
         )}
-
-        <section>
-          <h2 className="label">{sending ? 'This reply, step by step' : 'Last reply, step by step'}</h2>
-          {steps.length === 0 ? (
-            <p className="quiet">No reply yet.</p>
-          ) : (
-            <ol className="steps">
-              {steps.map((s, i) => (
-                <li key={i} className={s.running ? 'running' : s.ok ? '' : 'failed'}>
-                  <span>{s.name}</span>
-                  <span className={`tier ${s.tier}`}>
-                    {tierLabel[s.tier]}
-                    {s.running ? ' …' : s.ok ? '' : ' failed'}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-          {!sending && data?.last_run && (
-            <p className="quiet">
-              {(data.last_run.ms / 1000).toFixed(1)} s · planned {data.last_run.mode === 'steps' ? 'step by step' : 'in one go'}
-              {data.last_run.rewrites > 0 && ' · rewritten once'}
-            </p>
-          )}
-        </section>
-
-        <section>
-          <h2 className="label">On her mind</h2>
-          {(data?.intentions.length ?? 0) === 0 ? (
-            <p className="quiet">Nothing she is waiting to bring up.</p>
-          ) : (
-            <ul className="intentions">
-              {data!.intentions.map((i) => (
-                <li key={i.id}>
-                  <span>{i.text}</span>
-                  <span className="sub">{i.status === 'sent' ? 'asked, waiting for an answer' : `${when(i.trigger_at)} · lets go ${when(i.expires_at)}`}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </aside>
       )}
     </div>

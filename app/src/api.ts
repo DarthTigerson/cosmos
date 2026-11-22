@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Signal } from './types'
+import type { BatteryStatus, MemoryBreakdown, MemoryUsage, Signal } from './types'
 
 interface Conn {
   baseUrl: string
@@ -8,11 +8,28 @@ interface Conn {
 
 declare global {
   interface Window {
-    cosmos?: { conn(): Promise<Conn> }
+    cosmos?: {
+      conn(): Promise<Conn>
+      memory(): Promise<MemoryUsage>
+      memoryBreakdown(): Promise<MemoryBreakdown>
+      battery(): Promise<BatteryStatus | null>
+      copy?(text: string): Promise<void>
+      setZoom(factor: number): void
+      onTextSize(handler: (dir: 'larger' | 'smaller' | 'reset') => void): () => void
+      onToggleNav?(handler: () => void): () => void
+    }
   }
 }
 
 let connPromise: Promise<Conn> | null = null
+
+// copyText puts text on the clipboard: through the app in Electron, where
+// the page itself may not touch the clipboard, or the browser's own way
+// in a plain browser.
+export async function copyText(text: string): Promise<void> {
+  if (window.cosmos?.copy) return window.cosmos.copy(text)
+  await navigator.clipboard.writeText(text)
+}
 
 // In Electron the preload script says where the core is. In a plain
 // browser (handy while developing) it comes from ?core=…&token=….
@@ -45,6 +62,21 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   return data as T
 }
 
+// upload sends a file as a form. The browser sets the content type itself,
+// since only it knows the boundary between the parts.
+export async function upload<T>(path: string, form: FormData): Promise<T> {
+  const c = await conn()
+  let res: Response
+  try {
+    res = await fetch(c.baseUrl + path, { method: 'POST', headers: { Authorization: `Bearer ${c.token}` }, body: form })
+  } catch {
+    throw new Error('The core is not answering. Is it still running?')
+  }
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error ?? `The core answered ${res.status}.`)
+  return data as T
+}
+
 // apiAudio asks the core for sound and returns the raw bytes.
 export async function apiAudio(path: string, body: unknown): Promise<ArrayBuffer> {
   const c = await conn()
@@ -61,18 +93,26 @@ export async function apiAudio(path: string, body: unknown): Promise<ArrayBuffer
   return res.arrayBuffer()
 }
 
-// apiHear sends a recording to the core and gets back the words in it.
-export async function apiHear(wav: ArrayBuffer): Promise<string> {
+// apiRecording sends a recording to the core, as for a voiceprint.
+export async function apiRecording(path: string, wav: ArrayBuffer): Promise<void> {
   const c = await conn()
   let res: Response
   try {
-    res = await fetch(c.baseUrl + '/api/hear', { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'Content-Type': 'audio/wav' }, body: wav })
+    res = await fetch(c.baseUrl + path, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'Content-Type': 'audio/wav' }, body: wav })
   } catch {
     throw new Error('The core is not answering. Is it still running?')
   }
-  const data = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(data?.error ?? `The core answered ${res.status}.`)
-  return (data?.text as string) ?? ''
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.error ?? `The core answered ${res.status}.`)
+  }
+}
+
+// socketAddress is where to open a WebSocket to the core. A WebSocket
+// cannot send the token as a header either.
+export async function socketAddress(path: string): Promise<string> {
+  const c = await conn()
+  return `${c.baseUrl.replace(/^http/, 'ws')}${path}?token=${encodeURIComponent(c.token)}`
 }
 
 // useAsset gives an address an <img> can load from the core. An image
@@ -128,10 +168,12 @@ export function useSignals(handler: Listener) {
 }
 
 // useLoad fetches a path and gives back the data, any error, and a reload.
+// An empty path loads nothing.
 export function useLoad<T>(path: string) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
   const reload = useCallback(() => {
+    if (!path) return
     api<T>(path)
       .then((d) => {
         setData(d)
