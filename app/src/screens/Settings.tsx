@@ -23,7 +23,7 @@ const fields: Record<Exclude<Section, 'voice'>, (keyof Config)[]> = {
   day: ['quiet_from', 'quiet_to', 'brief_hour', 'sleep_hour', 'initiative_budget', 'cooldown_minutes'],
   thinks: ['planning', 'verify_with_model', 'verify_claims'],
   may: ['web_search', 'podcasts', 'weather_watch'],
-  ears: ['name_sounds_like', 'listen_window', 'room_minutes', 'hear_language', 'answer_others'],
+  ears: ['name_sounds_like', 'listen_window', 'hear_pause', 'room_minutes', 'hear_language', 'answer_others'],
   eyes: ['remember_faces', 'unknown_face_days'],
 }
 
@@ -384,6 +384,9 @@ export function Settings({ onSaved }: { onSaved: () => void }) {
                   </Field>
                   <Field id="listen-window" label="Seconds she listens on after a reply">
                     <input id="listen-window" type="number" min={0} max={300} value={cfg.listen_window} onChange={(e) => set({ listen_window: Math.max(0, Number(e.target.value)) })} />
+                  </Field>
+                  <Field id="hear-pause" label="Seconds of quiet that end what you say">
+                    <input id="hear-pause" type="number" min={0.4} max={3} step={0.1} value={cfg.hear_pause || 0.9} onChange={(e) => set({ hear_pause: Math.min(3, Math.max(0.4, Number(e.target.value))) })} />
                   </Field>
                   <Field id="room-minutes" label="Minutes of nearby talk kept">
                     <input id="room-minutes" type="number" min={0} max={30} value={cfg.room_minutes} onChange={(e) => set({ room_minutes: Math.max(0, Number(e.target.value)) })} />

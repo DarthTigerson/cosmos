@@ -200,6 +200,38 @@ func (h *Hearing) Hear(ctx context.Context, wav []byte, model, lang, prompt stri
 	return Cleaned(out.Text), nil
 }
 
+// HearFor is Hear for something that may have been said to her: the
+// words, and whether her name (or something like it) is in them.
+// Primed with her name, Whisper sometimes leaves it out when it opens
+// what was said, taking it for the prompt. Heard again unprimed, her
+// name is caught; only talk not for her pays for the second listen,
+// and only when her name matters (needName), not while she is already
+// talking with someone.
+func (h *Hearing) HearFor(ctx context.Context, wav []byte, model, lang, prompt, name string, also []string, needName bool) (string, bool, error) {
+	text, err := h.Hear(ctx, wav, model, lang, prompt)
+	if err != nil {
+		return "", false, err
+	}
+	addressed := Addressed(text, name, also)
+	if needName && !addressed && text != "" && prompt != "" {
+		if plain, err := h.Hear(ctx, wav, model, lang, ""); err == nil && Addressed(plain, name, also) {
+			addressed = true
+		}
+	}
+	return text, addressed, nil
+}
+
+// HearingPrompt is the line Whisper is primed with: who is talking to
+// whom, and where. Written as a sentence, since a bare list of names is
+// left out of what follows it.
+func HearingPrompt(user, companion, location string) string {
+	p := user + " is talking with " + companion + " at home"
+	if location != "" {
+		p += " in " + location
+	}
+	return p + "."
+}
+
 // Cleaned tidies what Whisper wrote. A note in brackets is what it
 // writes when it hears no speech.
 func Cleaned(text string) string {

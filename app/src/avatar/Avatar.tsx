@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, apiHear, useSignals } from '../api'
+import { api, useSignals } from '../api'
 import type { State, StepSignal, StreamEvent } from '../types'
-import { type Ears, openEars } from './ears'
+import { type Call, openCall } from './call'
 import { HearingMark, type HearingTone } from './HearingMark'
 import { watchFrom } from './glance'
 import type { Watching } from './sight'
 import { sentences, Speaker } from './speech'
 import { shownFor } from './feelings'
 import { Stage } from './stage'
-
-// The words of a line, lower case, without punctuation.
-function wordsOf(line: string): string[] {
-  return line.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w.length > 1)
-}
 
 type Ear = 'off' | 'listening' | 'hearing' | 'writing'
 
@@ -27,9 +22,6 @@ function shared(a: string[], b: string[]): number {
   while (i < a.length && i < b.length && a[i] === b[i]) i++
   return i
 }
-
-// Things a speech recogniser writes when it is handed a noise.
-const notSpeech = ['you', 'thank you.', 'thanks for watching!', 'thank you for watching.', 'bye.', '.', 'okay.']
 
 // How she is shown beside the chat: her full figure, a small round one,
 // none at all, or her figure filling the panel with the rest over it.
@@ -59,11 +51,13 @@ const keep = (key: string, value: string) => {
 //   - see: the camera. She decides for herself what to do with it.
 // All three go on whichever way she is shown. The camera stays on until
 // it is turned off, except while she sleeps.
-export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string, spoken: boolean) => void; view: HerView; mindCount: number }) {
+export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string, spoken: boolean, heard?: number) => void; view: HerView; mindCount: number }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<Stage | null>(null)
   const speaker = useRef<Speaker | null>(null)
-  const ears = useRef<Ears | null>(null)
+  // The call: while she listens, the microphone and her voice go over
+  // it, and the core decides what was said to her.
+  const call = useRef<Call | null>(null)
   const shown = view !== 'text'
   const [ready, setReady] = useState(false)
   const [problem, setProblem] = useState('')
@@ -75,40 +69,14 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   // (and for a short while after she answers, without it). The second
   // keeps her out of conversations that are not with her.
   const [byName, setByName] = useState(() => kept('cosmos:her-listen') !== 'all')
-  const named = useRef(byName)
-  named.current = byName
-  // Until when what is said is taken as meant for her without her name:
+  // Whether what is said is taken as meant for her without her name:
   // held open while she works on a reply, then open a little longer.
+  // The core keeps the window; this only shows it.
   const [talking, setTalking] = useState(false)
   // How loud the room is, 0 to 1, for the mark in the listen button.
   const loudness = useRef(0)
-  const openUntil = useRef(0)
-  const windowFor = useRef(25)
-  // Set when you said goodbye: the window shuts after this reply.
-  const closing = useRef(false)
-  const inWindow = () => Date.now() < openUntil.current
-  const holdOpen = () => {
-    openUntil.current = Infinity
-    setTalking(true)
-  }
   // Her reply is over: the window runs from now, or shuts.
-  const letRun = () => {
-    if (openUntil.current !== Infinity) return
-    if (closing.current) {
-      closing.current = false
-      openUntil.current = 0
-      setTalking(false)
-      return
-    }
-    openUntil.current = Date.now() + windowFor.current * 1000
-  }
-  useEffect(() => {
-    if (!talking) return
-    const id = window.setInterval(() => {
-      if (!inWindow()) setTalking(false)
-    }, 1000)
-    return () => window.clearInterval(id)
-  }, [talking])
+  const letRun = () => call.current?.idle()
   // She may keep her camera on: it stays on whichever way she is shown,
   // goes off while she sleeps, and comes back when she wakes.
   const [wantSight, setWantSight] = useState(() => kept('cosmos:her-sight') === 'on')
@@ -141,30 +109,13 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   say.current = onSay
   // What of the reply being written has already been said aloud.
   const said = useRef<string[]>([])
-  // Her own recent words, so that if the microphone picks her up from
-  // the speakers, what comes back is known to be hers and is dropped.
-  const hers = useRef<{ words: Set<string>; at: number }>({ words: new Set(), at: 0 })
-  const noteHers = (line: string) => {
-    const now = Date.now()
-    if (now - hers.current.at > 30_000) hers.current.words = new Set()
-    for (const w of wordsOf(line)) hers.current.words.add(w)
-    hers.current.at = now
-  }
-  const isHers = (heard: string) => {
-    if (Date.now() - hers.current.at > 30_000) return false
-    const w = wordsOf(heard)
-    if (w.length === 0) return false
-    const shared = w.filter((x) => hers.current.words.has(x)).length
-    // Nearly all of it is something she just said.
-    return shared / w.length >= 0.7
-  }
 
   if (!speaker.current) {
     const sp = new Speaker()
     sp.onMouth = (m) => stage.current?.setMouth(m)
     sp.onState = (on) => {
       setSpeaking(on)
-      ears.current?.setHerSpeaking(on)
+      call.current?.setHerSpeaking(on)
       if (!on && !busy.current) letRun()
     }
     sp.onError = setProblem
@@ -192,8 +143,8 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   useEffect(
     () => () => {
       speaker.current?.stop()
-      ears.current?.stop()
-      ears.current = null
+      call.current?.stop()
+      call.current = null
       sight.current?.stop()
       sight.current = null
     },
@@ -322,7 +273,6 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
       for (let i = said.current.length; i < done.length; i++) {
         if (risky.test(done[i])) break
         said.current.push(done[i])
-        noteHers(done[i])
         sp.say(done[i])
       }
       return
@@ -348,115 +298,79 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
       sp.stop()
       sp.say('Sorry, let me put that better.')
     }
-    for (const line of rest) {
-      noteHers(line)
-      sp.say(line)
-    }
+    for (const line of rest) sp.say(line)
   })
 
   async function startListening() {
     setProblem('')
+    const sp = speaker.current!
+    const back = () => {
+      sp.duck(false)
+      setEar((cur) => (cur === 'off' ? 'off' : 'listening'))
+    }
     try {
-      ears.current = await openEars({
-        // Something began: she goes quieter until it is clear it is you.
-        start: () => {
-          speaker.current?.duck(true)
-          setEar('hearing')
-        },
-        // It is you: she stops, as a person would, and leaves the rest
-        // of that reply unsaid. Listening for her name, she stops at once
-        // only for someone she is talking with; anyone else she waits on
-        // until it is clear they are talking to her.
-        confirmed: () => {
-          if (named.current && !inWindow()) return
-          if (speaker.current?.speaking) {
-            speaker.current.stop()
+      call.current = await openCall(
+        {
+          // Something began: she goes quieter until it is clear it is you.
+          start: () => {
+            sp.duck(true)
+            setEar('hearing')
+          },
+          dropped: back,
+          // Someone she is talking with is speaking over her: she stops,
+          // as a person would, and leaves the rest of that reply unsaid.
+          cut: () => {
+            if (!sp.speaking) return
+            sp.stop()
             hushed.current = true
-          }
+          },
+          writing: () => setEar('writing'),
+          ignored: back,
+          say: (words, heard, cut) => {
+            // Said while she was working on a reply (which the core has
+            // dropped, to answer both together), or while she was still
+            // speaking: what she was saying is left unsaid.
+            if (cut || sp.speaking) {
+              hushed.current = true
+              sp.stop()
+            }
+            back()
+            say.current(words, true, heard)
+          },
+          window: setTalking,
+          problem: setProblem,
+          level: (v) => {
+            loudness.current = v
+          },
+          closed: () => {
+            stopListening()
+            setProblem('Her ears stopped: the core ended the call. Turn listening on again to carry on.')
+          },
         },
-        level: (v) => {
-          loudness.current = v
-        },
-        dropped: () => {
-          speaker.current?.duck(false)
-          setEar((cur) => (cur === 'off' ? 'off' : 'listening'))
-        },
-        heard: (wav) => {
-          setEar('writing')
-          apiHear(wav)
-            .then((heard) => {
-              const words = heard.text.trim()
-              windowFor.current = heard.window
-              const who = heard.speaker.who
-              // Her own voice, back through the speakers: not something said.
-              if (who === 'her') {
-                speaker.current?.duck(false)
-                return
-              }
-              const real = words.length > 1 && !notSpeech.includes(words.toLowerCase()) && !isHers(words)
-              // Someone else, when she answers only the user: what they say
-              // is what is going on around her, even with her name in it.
-              const theirs = named.current && !heard.others && (who === 'person' || who === 'someone')
-              // Not for her: kept for a few minutes as what is going on
-              // around her, in memory only, and she carries on.
-              if (real && named.current && (theirs || (!heard.addressed && !inWindow()))) {
-                speaker.current?.duck(false)
-                const said = who === 'person' && heard.speaker.name ? `${heard.speaker.name}: ${words}` : words
-                void api('/api/overheard', { method: 'POST', body: { text: said } }).catch(() => {})
-                return
-              }
-              if (real) {
-                holdOpen()
-                closing.current = heard.ending
-                // Said while she was still working on a reply: that reply
-                // is dropped and she answers both together.
-                if (busy.current) {
-                  hushed.current = true
-                  speaker.current?.stop()
-                  void api('/api/interrupt', { method: 'POST' }).catch(() => {})
-                } else if (speaker.current?.speaking) {
-                  // Too short to stop her while it was said ("wait!"), but
-                  // real words: she stops now.
-                  hushed.current = true
-                  speaker.current.stop()
-                }
-                speaker.current?.duck(false)
-                say.current(words, true)
-              } else {
-                speaker.current?.duck(false)
-              }
-            })
-            .catch((e: Error) => {
-              speaker.current?.duck(false)
-              setProblem(`She could not make that out: ${e.message}`)
-            })
-            .finally(() => setEar((cur) => (cur === 'off' ? 'off' : 'listening')))
-        },
-      })
+        byName,
+      )
     } catch {
-      setProblem('She cannot hear you: the microphone is not allowed. Allow it for Cosmos in System Settings, under Privacy and Security.')
+      setProblem('She cannot hear you: the microphone is not allowed, or the core would not take the call. Allow the microphone for Cosmos in System Settings, under Privacy and Security.')
       return
     }
+    const c = call.current
+    sp.voiceFrom = (text) => c.speak(text)
     setEar('listening')
-    // Her ears and voice load now, not on the first thing said.
-    void api('/api/hear/ready', { method: 'POST' }).catch(() => {})
   }
 
   function stopListening() {
     setEar('off')
-    ears.current?.stop()
-    ears.current = null
-    openUntil.current = 0
-    closing.current = false
+    call.current?.stop()
+    call.current = null
+    if (speaker.current) speaker.current.voiceFrom = null
     setTalking(false)
-    // What she overheard goes with her ears.
-    void api('/api/overheard', { method: 'DELETE' }).catch(() => {})
   }
 
   function toggleByName() {
     const next = !byName
     setByName(next)
     keep('cosmos:her-listen', next ? 'name' : 'all')
+    call.current?.setByName(next)
   }
 
   function toggleVoice() {

@@ -104,7 +104,7 @@ export interface KeptSession extends Session {
 
 export interface Step {
   name: string
-  tier: 'main' | 'worker' | 'tool' | 'code'
+  tier: 'main' | 'worker' | 'tool' | 'code' | 'voice'
   ok: boolean
   ms: number
   note?: string
@@ -333,6 +333,7 @@ export interface Config {
   hear_language: string
   name_sounds_like: string[] | null
   listen_window: number
+  hear_pause: number
   room_minutes: number
   remember_faces: boolean
   answer_others: boolean

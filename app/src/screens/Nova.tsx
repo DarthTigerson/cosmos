@@ -7,7 +7,7 @@ import { clock, longDate, when } from '../format'
 import { Linked, Meters, Problem } from '../parts'
 import type { Run, State, Step, StepSignal, StreamEvent, Today } from '../types'
 
-const tierLabel: Record<Step['tier'], string> = { main: 'main model', worker: 'worker', tool: 'tool', code: 'check' }
+const tierLabel: Record<Step['tier'], string> = { main: 'main model', worker: 'worker', tool: 'tool', code: 'check', voice: 'voice' }
 
 interface LiveStep {
   name: string
@@ -140,6 +140,7 @@ export function Nova({ state }: { state: State | null }) {
   const [waiting, setWaiting] = useState<string[]>([])
   const queued = useRef<string[]>([])
   const queuedAloud = useRef(false)
+  const queuedHeard = useRef(0)
   const [sendError, setSendError] = useState('')
   const [live, setLive] = useState<LiveStep[] | null>(null)
   // Her reply as she writes it, before the finished one arrives.
@@ -245,11 +246,12 @@ export function Nova({ state }: { state: State | null }) {
 
   // say sends words to her, typed or spoken. While she is busy they
   // wait, and everything that waited goes as one message.
-  async function say(say: string, spoken = false) {
+  async function say(say: string, spoken = false, heard = 0) {
     if (!say) return
     if (busy.current) {
       queued.current = [...queued.current, say]
       queuedAloud.current ||= spoken
+      if (heard) queuedHeard.current = heard
       setWaiting(queued.current)
       return
     }
@@ -258,11 +260,14 @@ export function Nova({ state }: { state: State | null }) {
     setSendError('')
     let next = say
     let aloud = spoken
+    // The number the call gave what was said, so its timings go with
+    // the reply.
+    let from = heard
     while (next) {
       // Asked to look, she takes one still from her camera, if it is on.
       const seen = asksToLook(next) ? glance() : null
       try {
-        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud, ...(seen ? { seen } : {}) } })
+        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud, ...(seen ? { seen } : {}), ...(from ? { heard: from } : {}) } })
       } catch (err) {
         setSendError((err as Error).message)
       }
@@ -270,8 +275,10 @@ export function Nova({ state }: { state: State | null }) {
       reload()
       next = queued.current.join(' ')
       aloud = queuedAloud.current
+      from = queuedHeard.current
       queued.current = []
       queuedAloud.current = false
+      queuedHeard.current = 0
       setWaiting([])
     }
     busy.current = false
@@ -500,7 +507,7 @@ export function Nova({ state }: { state: State | null }) {
             ))}
           </div>
         </div>
-        {state && <Avatar state={state} working={sending} onSay={(words, spoken) => void say(words, spoken)} view={view} mindCount={data?.intentions.length ?? 0} />}
+        {state && <Avatar state={state} working={sending} onSay={(words, spoken, heard) => void say(words, spoken, heard)} view={view} mindCount={data?.intentions.length ?? 0} />}
         {view === 'only' ? (
           <>
             <button type="button" className="her-details-open" aria-expanded={details} onClick={() => setDetails(!details)}>

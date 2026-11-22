@@ -69,14 +69,39 @@ for a few minutes in memory only, so a reply she is asked for knows what
 was just said; it is never written to her stream, memories or sleep.
 "Answer everything" turns the name gate off.
 
+While she listens, the app and the core hold one call open (a WebSocket,
+`/api/call`): the microphone goes up as 16 kHz sound, cut on the audio
+thread, and her voice comes back as raw sound with the timing of each
+speech sound. The core does the rest. Silero VAD (on this computer)
+says when someone starts and stops speaking; a pause of `hear_pause`
+seconds (0.9 by default) ends what was said, so a breath does not.
 Speech is written out by `whisper-server` (from `brew install
 whisper-cpp`), kept running while she listens and stopped after 15 idle
 minutes; the model is the first `.bin` in `~/models/whisper` unless
-`hear_model` names one. Her voice is Kokoro, started when listening
-starts. Cutting in stops her only once it is clearly someone speaking
-(and, listening for her name, someone she is talking with); words said
-while she is working are never dropped, and cut her current reply short
-so she answers everything together.
+`hear_model` names one. Her voice is Kokoro, started when the call
+opens. Cutting in stops her only once it is clearly someone speaking,
+not her own voice coming back (and, listening for her name, someone she
+is talking with); words said while she is working are never dropped,
+and cut her current reply short so she answers everything together.
+Without Silero she judges speech by loudness, as before:
+
+```bash
+mkdir -p ~/models/vad
+curl -L -o ~/models/vad/silero_vad.onnx https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
+```
+
+Each spoken reply's steps (in "Last reply") start with how long writing
+out took and end with how soon after you stopped speaking her first
+sentence was ready and first heard.
+
+**Checking her ears.** `cd core && go run ./cmd/voice-check -make` makes
+test clips with her voice model (you, her, other people, a television,
+sound-alikes of her name, noise) and runs them through what a call
+does: speech detection, writing out, her name, whose voice, and whether
+she would answer. It prints what she missed and what she answered that
+she should not have, with timings, and writes `results.txt`. Add your
+own recordings to `core/testdata/voice/clips.json`; the clips stay out
+of git and on this computer.
 
 **Faces and voices.** With her camera on, a face she follows for a moment
 is lined up in the camera worker and turned into a faceprint; a crop is

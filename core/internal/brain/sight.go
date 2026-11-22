@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -457,6 +459,37 @@ func (b *Brain) WhoSpoke(ctx context.Context, wav []byte) Speaker {
 		return Speaker{Who: "person", Name: b.personName(view[0]), PersonID: view[0], Score: score}
 	}
 	return Speaker{Who: "someone", Score: score}
+}
+
+// IsHer says whether a stretch of sound is her own voice, back from the
+// speakers. It only compares; nothing is learned from it, since a scrap
+// heard while she talks is no one's voice to keep. known is false when
+// she has no print of her own voice to compare with.
+func (b *Brain) IsHer(ctx context.Context, wav []byte) (her, known bool) {
+	if b.Senses == nil || !b.Senses.CanHearVoices() {
+		return false, false
+	}
+	prints, _ := b.S.Voiceprints()
+	if !slices.ContainsFunc(prints, func(p store.Voiceprint) bool { return p.Owner == "her" }) {
+		return false, false
+	}
+	vec, err := b.Senses.Voiceprint(ctx, wav)
+	if err != nil {
+		return false, true
+	}
+	mine, theirs := 0.0, 0.0
+	for _, p := range prints {
+		s := voice.Similarity(vec, p.Vec)
+		if p.Owner == "her" {
+			mine = math.Max(mine, s)
+		} else {
+			theirs = math.Max(theirs, s)
+		}
+	}
+	// A short scrap matches less well than a sentence, so the bar is
+	// lower than for knowing who spoke; it must still be her more than
+	// anyone.
+	return mine > theirs && mine >= b.Cfg.Get().VoiceSure*0.8, true
 }
 
 // LearnVoice keeps a voiceprint for the user ("user") or for her own voice

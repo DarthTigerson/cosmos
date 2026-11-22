@@ -84,6 +84,9 @@ type Config struct {
 	// ListenWindow is how many seconds after her reply she still takes
 	// what is said as meant for her, without her name.
 	ListenWindow int `json:"listen_window"`
+	// HearPause is how many seconds of quiet end what the user is saying.
+	// Shorter pauses, for a breath or a thought, are kept in it.
+	HearPause float64 `json:"hear_pause"`
 	// RoomMinutes is how long what she overhears is kept, in memory
 	// only, for the reply she is next asked for. 0 keeps nothing.
 	RoomMinutes int `json:"room_minutes"`
@@ -132,6 +135,7 @@ func Default() Config {
 		Podcasts:         true,
 		HearLanguage:     "en",
 		ListenWindow:     25,
+		HearPause:        0.9,
 		RoomMinutes:      3,
 		FaceSure:         0.45,
 		FaceMaybe:        0.32,

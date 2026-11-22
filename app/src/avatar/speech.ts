@@ -1,4 +1,5 @@
 import { api } from '../api'
+import type { Mark, Spoken } from './call'
 import type { Mouth } from './stage'
 
 // Her voice. The core turns a sentence into sound and says when each
@@ -7,11 +8,11 @@ import type { Mouth } from './stage'
 // on p, b and m, round on "oo", wide on "ee". That is what makes the
 // words seem to come from her.
 
-type Mark = [start: number, length: number, sound: string]
-
 interface Clip {
   buffer: AudioBuffer
   marks: Mark[]
+  // Tells the call the sound has started, so it can time her answer.
+  played?: () => void
 }
 
 const SHUT: Mouth = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 }
@@ -131,6 +132,9 @@ export class Speaker {
   onMouth: (m: Mouth) => void = () => {}
   onState: (speaking: boolean) => void = () => {}
   onError: (message: string) => void = () => {}
+  // While a call is open her voice comes over it, as raw sound; without
+  // one each sentence is asked for on its own.
+  voiceFrom: ((text: string) => { sound: Promise<Spoken>; played: () => void }) | null = null
 
   private audio(): AudioContext {
     this.ctx ??= new AudioContext()
@@ -165,12 +169,18 @@ export class Speaker {
     if (!words) return
     const ctx = this.audio()
     const gen = this.generation
+    const asked = this.voiceFrom?.(words)
+    const sound: Promise<Spoken> = asked
+      ? asked.sound
+      : api<{ audio: string; marks: Mark[] }>('/api/speech', { method: 'POST', body: { text: words } }).then((res) => ({
+          audio: Uint8Array.from(atob(res.audio), (c) => c.charCodeAt(0)).buffer,
+          marks: res.marks ?? [],
+        }))
     this.queue.push(
-      api<{ audio: string; marks: Mark[] }>('/api/speech', { method: 'POST', body: { text: words } })
+      sound
         .then(async (res) => {
           if (gen !== this.generation) return null
-          const raw = Uint8Array.from(atob(res.audio), (c) => c.charCodeAt(0))
-          return { buffer: await ctx.decodeAudioData(raw.buffer), marks: res.marks ?? [] }
+          return { buffer: await ctx.decodeAudioData(res.audio), marks: res.marks, played: asked?.played }
         })
         .catch((e: Error) => {
           if (gen === this.generation) this.onError(`She could not speak: ${e.message}`)
@@ -242,6 +252,7 @@ export class Speaker {
       }
       this.source = source
       source.start()
+      clip.played?.()
       tick()
     })
   }

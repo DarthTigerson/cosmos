@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cosmos/core/internal/brain"
@@ -41,6 +42,9 @@ type Server struct {
 	Hearing *voice.Hearing
 	// Senses turns faces and voices into prints; nil when not set up.
 	Senses *voice.Senses
+
+	callMu  sync.Mutex
+	current *call
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -95,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/speech", s.auth(s.speech))
 	mux.HandleFunc("POST /api/hear", s.auth(s.hear))
 	mux.HandleFunc("POST /api/hear/ready", s.auth(s.hearReady))
+	mux.HandleFunc("GET /api/call", s.auth(s.call))
 	mux.HandleFunc("POST /api/overheard", s.auth(s.overheard))
 	mux.HandleFunc("DELETE /api/overheard", s.auth(s.forgetOverheard))
 	mux.HandleFunc("GET /api/senses", s.auth(s.senses))
@@ -264,6 +269,9 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		Spoken bool `json:"spoken"`
 		// Seen: a picture from her camera, as a data: URI.
 		Seen string `json:"seen"`
+		// Heard: the number the call gave what was said, so how it was
+		// heard and how soon she answered go in the reply's run.
+		Heard int64 `json:"heard"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
 		fail(w, 400, "send {\"text\": \"...\"}")
@@ -280,10 +288,12 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		said := brain.Said{Aloud: in.Spoken, Seen: in.Seen}
 		if in.Spoken {
 			said.Room = s.B.Room()
+			said.Heard = s.heardSteps(in.Heard)
 		}
 		ctx = brain.WithSaid(ctx, said)
 	}
 	reply, err := s.B.HandleMessage(ctx, in.Text)
+	s.answered(in.Heard, reply.Run.ID)
 	if errors.Is(err, brain.ErrInterrupted) {
 		writeJSON(w, 200, map[string]any{"interrupted": true, "run": reply.Run})
 		return
@@ -865,42 +875,40 @@ func (s *Server) hear(w http.ResponseWriter, r *http.Request) {
 	// Whose voice it is, worked out while the words are.
 	spoke := make(chan brain.Speaker, 1)
 	go func() { spoke <- s.B.WhoSpoke(ctx, wav) }()
-	writeJSON := func(w http.ResponseWriter, status int, view map[string]any) {
-		view["speaker"] = <-spoke
-		writeJSON(w, status, view)
+	text, addressed, err := s.listen(ctx, cfg, wav, true)
+	if err != nil {
+		<-spoke
+		fail(w, 500, err.Error())
+		return
 	}
+	view := heardView(cfg, text)
+	view["addressed"] = addressed
+	view["speaker"] = <-spoke
+	writeJSON(w, 200, view)
+}
+
+// listen writes out the words in a recording, and says whether her name
+// is in them. needName is false when it makes no difference.
+func (s *Server) listen(ctx context.Context, cfg config.Config, wav []byte, needName bool) (string, bool, error) {
 	if s.Hearing != nil && s.Hearing.Missing(cfg.HearModel) == "" {
-		text, err := s.Hearing.Hear(ctx, wav, cfg.HearModel, cfg.HearLanguage, hearingPrompt(cfg))
+		text, addressed, err := s.Hearing.HearFor(ctx, wav, cfg.HearModel, cfg.HearLanguage, voice.HearingPrompt(cfg.UserName, cfg.CompanionName, cfg.Location), cfg.CompanionName, cfg.NameSoundsLike, needName)
 		if err == nil {
-			view := heardView(cfg, text)
-			// Primed with her name, Whisper sometimes leaves it out when it
-			// opens what was said, taking it for the prompt. Heard again
-			// unprimed, her name is caught; only talk not for her pays for
-			// the second listen.
-			if !view["addressed"].(bool) {
-				if plain, err := s.Hearing.Hear(ctx, wav, cfg.HearModel, cfg.HearLanguage, ""); err == nil && voice.Addressed(plain, cfg.CompanionName, cfg.NameSoundsLike) {
-					view["addressed"] = true
-				}
-			}
-			writeJSON(w, 200, view)
-			return
+			return text, addressed, nil
 		}
 		s.B.Log.Printf("hear: %v; trying whisper-cli", err)
 	}
 	tmp, err := os.CreateTemp("", "cosmos-heard-*.wav")
 	if err != nil {
-		fail(w, 500, err.Error())
-		return
+		return "", false, err
 	}
 	defer os.Remove(tmp.Name())
 	tmp.Write(wav)
 	tmp.Close()
 	text, err := (&brain.WhisperCLI{}).Hear(ctx, tmp.Name())
 	if err != nil {
-		fail(w, 500, err.Error())
-		return
+		return "", false, err
 	}
-	writeJSON(w, 200, heardView(cfg, text))
+	return text, voice.Addressed(text, cfg.CompanionName, cfg.NameSoundsLike), nil
 }
 
 // heardView is the words heard, whether her name is in them, and
@@ -934,35 +942,10 @@ func (s *Server) forgetOverheard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"forgotten": true})
 }
 
-// hearingPrompt is the line Whisper is primed with: who is talking to
-// whom, and where. Written as a sentence, since a bare list of names is
-// left out of what follows it.
-func hearingPrompt(cfg config.Config) string {
-	p := cfg.UserName + " is talking with " + cfg.CompanionName + " at home"
-	if cfg.Location != "" {
-		p += " in " + cfg.Location
-	}
-	return p + "."
-}
-
 // hearReady gets her ears and her voice ready when listening starts, so
 // the first exchange is as quick as the rest.
 func (s *Server) hearReady(w http.ResponseWriter, r *http.Request) {
-	cfg := s.B.Cfg.Get()
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		if s.Hearing != nil {
-			if err := s.Hearing.Ready(ctx, cfg.HearModel, cfg.HearLanguage); err != nil {
-				s.B.Log.Printf("hear ready: %v", err)
-			}
-		}
-		if s.Voice != nil && s.Voice.Missing() == "" {
-			if err := s.Voice.Ready(ctx); err != nil {
-				s.B.Log.Printf("voice ready: %v", err)
-			}
-		}
-	}()
+	s.warm()
 	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
 }
 
@@ -980,65 +963,67 @@ func (s *Server) speech(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "unreadable: "+err.Error())
 		return
 	}
-	// Marks that are for the eye, not the ear. An address is not read
-	// out letter by letter; the chat has it.
-	text := webAddress.ReplaceAllString(in.Text, "the link")
-	text = strings.NewReplacer("*", "", "_", " ", "`", "", "#", "", "\n", " ").Replace(text)
-	text = strings.TrimSpace(text)
+	text := sayable(in.Text)
 	if text == "" {
 		fail(w, 400, "nothing to say")
 		return
 	}
-	if r := []rune(text); len(r) > 1500 {
-		text = string(r[:1500])
-	}
-	// Her own voice when it is set up; the computer's plain one if not.
-	if s.Voice != nil && s.Voice.Missing() == "" {
-		which := in.Voice
-		if which == "" {
-			which = s.B.Cfg.Get().Voice
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-		defer cancel()
-		spoken, err := s.Voice.Speak(ctx, text, which, 1)
-		if err != nil {
-			fail(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 200, spoken)
-		return
-	}
-	bin, err := exec.LookPath("say")
-	if err != nil {
-		fail(w, 501, "this computer has no built-in voice")
-		return
-	}
-	out, err := os.CreateTemp("", "cosmos-speech-*.wav")
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	wav, marks, err := s.spoken(ctx, text, in.Voice)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	writeJSON(w, 200, voice.Spoken{Audio: base64.StdEncoding.EncodeToString(wav), Marks: marks})
+}
+
+// sayable takes out of a reply what is for the eye, not the ear. An
+// address is not read out letter by letter; the chat has it.
+func sayable(text string) string {
+	text = webAddress.ReplaceAllString(text, "the link")
+	text = strings.NewReplacer("*", "", "_", " ", "`", "", "#", "", "\n", " ").Replace(text)
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > 1500 {
+		text = string(r[:1500])
+	}
+	return text
+}
+
+// spoken is text as sound, a WAV file, and when each speech sound in it
+// falls. Her own voice when it is set up (the one given, or hers); the
+// computer's plain one if not, which gives no timing.
+func (s *Server) spoken(ctx context.Context, text, which string) ([]byte, []json.RawMessage, error) {
+	if s.Voice != nil && s.Voice.Missing() == "" {
+		if which == "" {
+			which = s.B.Cfg.Get().Voice
+		}
+		out, err := s.Voice.Speak(ctx, text, which, 1)
+		if err != nil {
+			return nil, nil, err
+		}
+		wav, err := base64.StdEncoding.DecodeString(out.Audio)
+		return wav, out.Marks, err
+	}
+	bin, err := exec.LookPath("say")
+	if err != nil {
+		return nil, nil, errors.New("this computer has no built-in voice")
+	}
+	out, err := os.CreateTemp("", "cosmos-speech-*.wav")
+	if err != nil {
+		return nil, nil, err
+	}
 	out.Close()
 	defer os.Remove(out.Name())
-	args := []string{"-o", out.Name(), "--data-format=LEI16@22050"}
-	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, "-o", out.Name(), "--data-format=LEI16@22050")
 	// The words go in on standard input, so nothing in them is ever
 	// read as an option.
 	cmd.Stdin = strings.NewReader(text)
 	if msg, err := cmd.CombinedOutput(); err != nil {
-		fail(w, 500, "the voice did not work: "+strings.TrimSpace(string(msg)+" "+err.Error()))
-		return
+		return nil, nil, errors.New("the voice did not work: " + strings.TrimSpace(string(msg)+" "+err.Error()))
 	}
-	// The built-in voice gives no timing; the app falls back to moving
-	// her mouth by the sound alone.
 	wav, err := os.ReadFile(out.Name())
-	if err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, voice.Spoken{Audio: base64.StdEncoding.EncodeToString(wav), Marks: []json.RawMessage{}})
+	return wav, []json.RawMessage{}, err
 }
 
 func (s *Server) feedback(w http.ResponseWriter, r *http.Request) {

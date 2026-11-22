@@ -1021,6 +1021,15 @@ func (s *Store) SetRunSteps(id int64, steps []Step) error {
 	return err
 }
 
+// AddRunStep adds one step to the end of a run's steps, for a step that
+// finishes after the run was recorded: the feeling, or when her voice
+// was first heard.
+func (s *Store) AddRunStep(id int64, step Step) error {
+	raw, _ := json.Marshal(step)
+	_, err := s.db.Exec(`UPDATE runs SET steps=json_insert(CASE WHEN json_valid(steps) THEN steps ELSE '[]' END,'$[#]',json(?)) WHERE id=?`, string(raw), id)
+	return err
+}
+
 // RunsSince returns runs at or after since, oldest first.
 func (s *Store) RunsSince(since time.Time) ([]Run, error) {
 	return s.queryRuns(`WHERE at>=? ORDER BY id`, ms(since))

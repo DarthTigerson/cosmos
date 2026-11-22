@@ -4,17 +4,25 @@ import "testing"
 
 func TestHerNameIsCaughtHoweverItIsSpelled(t *testing.T) {
 	for heard, want := range map[string]bool{
-		"Clarke, what's the weather?":       true,
-		"Hey Clark, add milk to the list":   true,
-		"clerk can you hear me":             true,
-		"Klark?":                            true,
-		"okay Claire what time is it":       true,
-		"Clarkey, you there?":               true,
-		"click the button and wait":         false,
-		"the clock is slow":                 false,
-		"I told Mark we would go tomorrow.": false,
-		"we went to the park":               false,
-		"":                                  false,
+		"Clarke, what's the weather?":               true,
+		"Hey Clark, add milk to the list":           true,
+		"clerk can you hear me":                     true,
+		"Klark?":                                    true,
+		"okay Claire what time is it":               true,
+		"What do you think about that, Clark?":      true,
+		"Claire and I are going out on Friday.":     false,
+		"Clark Kent was seen flying over the city":  false,
+		"The clerk at the store gave me the change": false,
+		"I went shopping with Claire":               false,
+		"What do you think about that Clark?":       true,
+		"that clerk was rude to me":                 false,
+		"Clarke and I are friends":                  true,
+		"Clarkey, you there?":                       true,
+		"click the button and wait":                 false,
+		"the clock is slow":                         false,
+		"I told Mark we would go tomorrow.":         false,
+		"we went to the park":                       false,
+		"":                                          false,
 	} {
 		if got := Addressed(heard, "Clarke", nil); got != want {
 			t.Errorf("Addressed(%q) = %v, want %v", heard, got, want)

@@ -36,6 +36,9 @@ type Said struct {
 	// as a data: URI. Only the model on this computer sees it; it is not
 	// stored with the message.
 	Seen string
+	// Heard is how hearing it went: from the end of what was said to the
+	// words. They begin the run's steps.
+	Heard []store.Step
 }
 
 type saidKey struct{}
@@ -65,6 +68,20 @@ func (b *Brain) Interrupt() bool {
 	b.cancelTurn()
 	b.cancelTurn = nil
 	return true
+}
+
+// Working says whether she is in the middle of a reply.
+func (b *Brain) Working() bool {
+	b.cancelMu.Lock()
+	defer b.cancelMu.Unlock()
+	return b.cancelTurn != nil
+}
+
+// AddRunStep adds a step that finished after its run was recorded.
+func (b *Brain) AddRunStep(runID int64, step store.Step) {
+	if runID != 0 {
+		b.S.AddRunStep(runID, step)
+	}
 }
 
 // trace records the steps of a run and tells the app as each one starts
@@ -1452,7 +1469,7 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	b.Bus.Publish("sessions", nil)
 	b.markAnswered()
 
-	t := &trace{b: b}
+	t := &trace{b: b, steps: append([]store.Step{}, saidOf(ctx).Heard...)}
 
 	// The conversation she is shown has only what was said. A step that
 	// failed a moment ago is not in it, so "try again" would mean nothing
@@ -1644,9 +1661,6 @@ func (b *Brain) afterReply(ctx context.Context, cfg config.Config, intent, text 
 	if err != nil {
 		step.Note = err.Error()
 	}
-	if run.ID != 0 {
-		b.S.SetRunSteps(run.ID, append(run.Steps, step))
-	}
 	// A request she carried out is not a moving moment, whatever the
 	// small model made of it.
 	if (intent == "calendar" || intent == "weather" || intent == "memory" || intent == "people" || intent == "web" || intent == "lists" || intent == "podcasts") && !commits(text) {
@@ -1666,11 +1680,11 @@ func (b *Brain) afterReply(ctx context.Context, cfg config.Config, intent, text 
 	after := b.feel(n.Appraisal)
 	// What it did to her is kept with the run, so a flat mood can be
 	// told apart from one that is not being moved at all.
-	if run.ID != 0 && err == nil {
+	if err == nil {
 		step.Note = fmt.Sprintf("%s %.1f · warmth %.2f→%.2f, energy %.2f→%.2f, confidence %.2f→%.2f", n.Emotion, n.Intensity,
 			before.Warmth, after.Warmth, before.Energy, after.Energy, before.Confidence, after.Confidence)
-		b.S.SetRunSteps(run.ID, append(run.Steps, step))
 	}
+	b.AddRunStep(run.ID, step)
 	// Getting something wrong costs her. A reply that failed its own
 	// checks, or one the user had to correct, knocks her confidence, and
 	// is written down so that tonight she looks at what went wrong.
