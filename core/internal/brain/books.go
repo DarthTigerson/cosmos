@@ -26,8 +26,6 @@ import (
 const (
 	bookMaxFile   = 256 << 20
 	bookPartWords = 1200
-	// She starts on a part only when nothing has been said for this long.
-	bookQuietFor = 10 * time.Minute
 	// Asleep, reading takes at most this much of the night.
 	bookSleepFor = 90 * time.Minute
 )
@@ -133,19 +131,31 @@ func chapterFile(book store.Book, n int) string {
 
 // RemoveBook takes a book off her shelf and deletes its files. What she
 // learned from it stays with her.
-func (b *Brain) RemoveBook(id int64) error {
+func (b *Brain) RemoveBook(id int64, forget bool) error {
 	book, ok := b.S.GetBook(id)
 	if !ok {
 		return errors.New("no such book")
 	}
-	if reading(book) {
-		return errors.New("she is reading it right now; wait until she has finished")
+	// If she is reading it right now, she stops.
+	b.bookMu.Lock()
+	if b.bookOn == id && b.bookCancel != nil {
+		b.bookCancel()
 	}
+	b.bookMu.Unlock()
 	if err := b.S.DeleteBook(id); err != nil {
 		return err
 	}
+	b.setNow(booksNow, id, false)
 	if book.Dir != "" {
 		os.RemoveAll(book.Dir)
+	}
+	// A book given by mistake (the wrong one, in the wrong language) is
+	// forgotten with what she took from it.
+	if forget {
+		for _, m := range b.BookMemories(book) {
+			b.S.SetMemoryArchived(m.ID, true)
+		}
+		b.Bus.Publish("memories", nil)
 	}
 	b.booksChanged()
 	return nil
@@ -156,13 +166,16 @@ func reading(book store.Book) bool {
 }
 
 // QueueBook asks her to read a book, again or for the first time, or to
-// try once more one that failed.
-func (b *Brain) QueueBook(id int64) error {
+// try once more one that failed. She reads it while she sleeps, or right
+// away when now is true.
+func (b *Brain) QueueBook(id int64, now bool) error {
 	book, ok := b.S.GetBook(id)
 	if !ok {
 		return errors.New("no such book")
 	}
+	b.setNow(booksNow, id, now)
 	if reading(book) || book.Status == "queued" {
+		b.booksChanged()
 		return nil
 	}
 	book.Status, book.Error, book.StageNote = "queued", "", ""
@@ -182,6 +195,7 @@ func (b *Brain) UnqueueBook(id int64) error {
 	}
 	book.Status = "waiting"
 	b.S.SaveBook(book)
+	b.setNow(booksNow, id, false)
 	b.booksChanged()
 	return nil
 }
@@ -204,18 +218,10 @@ func (b *Brain) SetBookKind(id int64, kind string) error {
 
 // ---------- reading on her own ----------
 
-// quietForBooks reports whether the user has left her alone long enough
-// for her to read.
-func (b *Brain) quietForBooks() bool {
-	if b.wanted.Load() > 0 {
-		return false
-	}
-	last, _ := b.S.RecentEvents(1, "user_msg")
-	return len(last) == 0 || b.Now().Sub(last[0].At) >= bookQuietFor
-}
-
-// bookTick is called from the heartbeat. It never blocks: reading runs
-// beside everything else, one part at a time, while the user is quiet.
+// bookTick is called from the heartbeat. Awake, she reads only a book the
+// user asked her to read now; the rest wait for her sleep. It never
+// blocks: reading runs beside everything else, one part at a time, and
+// steps aside for anything said to her.
 func (b *Brain) bookTick(ctx context.Context) {
 	if b.BookDir == "" || !b.Cfg.Get().Books || !b.bookBusy.CompareAndSwap(false, true) {
 		return
@@ -225,11 +231,11 @@ func (b *Brain) bookTick(ctx context.Context) {
 		defer b.bg.Done()
 		defer b.bookBusy.Store(false)
 		ctx := context.WithoutCancel(ctx)
-		for b.quietForBooks() {
+		for b.wanted.Load() == 0 {
 			b.lockForBackground()
 			// While she slept the book may have been read on; each part
 			// starts again from what is saved.
-			more := b.S.Get("state") != "asleep" && b.quietForBooks() && b.bookStep(ctx, false)
+			more := b.S.Get("state") != "asleep" && b.bookStep(ctx, false)
 			b.turn.Unlock()
 			if !more {
 				return
@@ -257,15 +263,34 @@ func (b *Brain) readAsleep(ctx context.Context) {
 // part, one chapter thought over, or the whole book thought over. The
 // caller holds the model. It reports false when there is nothing to do.
 func (b *Brain) bookStep(ctx context.Context, asleep bool) bool {
-	book, ok := b.nextBook()
+	// Awake, only what the user asked for now.
+	book, ok := b.nextBook(!asleep)
 	if !ok {
 		return false
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	b.bookMu.Lock()
+	b.bookOn, b.bookCancel = book.ID, cancel
+	b.bookMu.Unlock()
+	defer func() {
+		b.bookMu.Lock()
+		b.bookOn, b.bookCancel = 0, nil
+		b.bookMu.Unlock()
+		cancel()
+	}()
+	// gone reports that the book was removed while she worked on it.
+	gone := func() bool {
+		_, ok := b.S.GetBook(book.ID)
+		return !ok
 	}
 	cfg := b.Cfg.Get()
 	if asleep {
 		book.Asleep = true
 	}
 	save := func(status, note string) {
+		if gone() {
+			return
+		}
 		book.Status, book.StageNote = status, note
 		b.S.SaveBook(book)
 		b.booksChanged()
@@ -349,6 +374,9 @@ func (b *Brain) bookStep(ctx context.Context, asleep bool) bool {
 			b.failBook(book, err)
 			return true
 		}
+		if gone() {
+			return true
+		}
 		book.FinishedAt = b.Now()
 		save("done", "")
 		b.keepBook(cfg, book)
@@ -357,9 +385,18 @@ func (b *Brain) bookStep(ctx context.Context, asleep bool) bool {
 }
 
 // nextBook is the book she is in the middle of, or else the one that has
-// waited longest.
-func (b *Brain) nextBook() (store.Book, bool) {
+// waited longest. onlyNow keeps to the books the user asked for now.
+func (b *Brain) nextBook(onlyNow bool) (store.Book, bool) {
 	all, _ := b.S.Books("opening", "reading", "digesting", "thinking", "queued")
+	if onlyNow {
+		mine := []store.Book{}
+		for _, book := range all {
+			if b.askedNow(booksNow, book.ID) {
+				mine = append(mine, book)
+			}
+		}
+		all = mine
+	}
 	for _, book := range all {
 		if reading(book) {
 			return book, true
@@ -384,6 +421,9 @@ func partAt(book store.Book, n int) (int, int) {
 }
 
 func (b *Brain) failBook(book store.Book, err error) {
+	if _, ok := b.S.GetBook(book.ID); !ok {
+		return // removed while she was reading it
+	}
 	book.Status, book.Error, book.StageNote = "failed", err.Error(), ""
 	b.S.SaveBook(book)
 	b.Log.Printf("books: %q failed: %v", book.Title, err)
@@ -771,7 +811,7 @@ func (b *Brain) SearchBook(book store.Book, query string, limit int) BookSearch 
 type BooksView struct {
 	Enabled bool `json:"enabled"`
 	// Paused is true when she is part way through a book and waiting for
-	// the user to be quiet.
+	// her sleep to go on with it.
 	Paused  bool         `json:"paused"`
 	Books   []store.Book `json:"books"`
 	Current *store.Book  `json:"current"`
@@ -806,6 +846,6 @@ func (b *Brain) Books() BooksView {
 			v.Done[j], v.Done[j-1] = v.Done[j-1], v.Done[j]
 		}
 	}
-	v.Paused = v.Current != nil && b.S.Get("state") != "asleep" && !b.quietForBooks()
+	v.Paused = v.Current != nil && b.S.Get("state") != "asleep" && !b.askedNow(booksNow, v.Current.ID)
 	return v
 }

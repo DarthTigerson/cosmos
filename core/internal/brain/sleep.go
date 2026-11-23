@@ -144,6 +144,19 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 	}
 	if lived == 0 {
 		report.Skipped = "nothing happened since the last sleep"
+		// A quiet day still leaves books and podcasts waiting for the
+		// night.
+		if b.nightWork() {
+			b.S.Set("state", "asleep")
+			b.Bus.Publish("state", "asleep")
+			if b.Rest != nil {
+				if err := b.Rest(ctx, true); err != nil {
+					b.Log.Printf("sleep: resting the waking models: %v", err)
+				}
+			}
+			b.readAsleep(ctx)
+			b.listenAsleep(ctx)
+		}
 		finish()
 		return report, nil
 	}
@@ -321,9 +334,11 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 		}
 	}
 
-	// ----- read -----
-	// The sleeper is loaded and the night is quiet: a good time to read.
+	// ----- read and listen -----
+	// The sleeper is loaded and the night is quiet: the time for books
+	// and podcasts.
 	b.readAsleep(ctx)
+	b.listenAsleep(ctx)
 
 	// ----- tidy -----
 	report.Tidied = b.tidy(ctx, cfg, now)

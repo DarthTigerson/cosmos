@@ -30,6 +30,9 @@ import (
 
 const (
 	podCheckEvery = 3 * time.Hour
+	// Asleep, listening takes at most this much of the night. An episode
+	// begun is finished.
+	podSleepFor   = 90 * time.Minute
 	podChunkWords = 900
 	podMaxFeed    = 64 << 20
 	podMaxAudio   = 2 << 30
@@ -411,20 +414,28 @@ func (b *Brain) UnqueueEpisode(id int64) error {
 	}
 	e.Status = "waiting"
 	err := b.S.SaveEpisode(e)
+	b.setNow(episodesNow, id, false)
 	b.podChanged()
 	return err
 }
 
-func (b *Brain) QueueEpisode(id int64) error {
+// She listens while she sleeps, or right away when now is true.
+func (b *Brain) QueueEpisode(id int64, now bool) error {
 	e, ok := b.S.GetEpisode(id)
 	if !ok {
 		return errors.New("no such episode")
 	}
 	// A finished episode can be gone over again; one in hand cannot be
 	// started twice.
+	if e.Status == "queued" {
+		b.setNow(episodesNow, id, now)
+		b.podChanged()
+		return nil
+	}
 	if e.Status != "waiting" && e.Status != "failed" && e.Status != "done" {
 		return errors.New("she has already taken that one on")
 	}
+	b.setNow(episodesNow, id, now)
 	e.Status, e.Error, e.StageNote = "queued", "", ""
 	err := b.S.SaveEpisode(e)
 	b.podChanged()
@@ -433,8 +444,10 @@ func (b *Brain) QueueEpisode(id int64) error {
 
 // ---------- listening on her own ----------
 
-// podcastTick is called from the heartbeat. It never blocks: the work
-// runs beside everything else, one episode at a time.
+// podcastTick is called from the heartbeat. Feeds are checked at any
+// time; awake, she listens only to an episode the user asked for now, and
+// the rest wait for her sleep. It never blocks: the work runs beside
+// everything else, one episode at a time.
 func (b *Brain) podcastTick(ctx context.Context) {
 	if b.PodDir == "" || !b.Cfg.Get().Podcasts || !b.podBusy.CompareAndSwap(false, true) {
 		return
@@ -451,19 +464,54 @@ func (b *Brain) podcastTick(ctx context.Context) {
 				b.podChanged()
 			}
 		}
-		// An episode left half-way by a restart is taken up again.
-		stuck, _ := b.S.Episodes(0, 10, "downloading", "transcribing", "reading", "thinking")
-		for _, e := range stuck {
-			e.Status = "queued"
-			b.S.SaveEpisode(e)
+		b.requeueStuck()
+		if b.S.Get("state") == "asleep" {
+			return // her sleep does the listening
 		}
-		queued, _ := b.S.Episodes(0, 1000, "queued")
-		if len(queued) == 0 {
+		if e, ok := b.nextEpisode(true); ok {
+			b.listen(ctx, e, false)
+		}
+	}()
+}
+
+// requeueStuck takes up again an episode a restart left half-way.
+func (b *Brain) requeueStuck() {
+	stuck, _ := b.S.Episodes(0, 10, "downloading", "transcribing", "reading", "thinking")
+	for _, e := range stuck {
+		e.Status = "queued"
+		b.S.SaveEpisode(e)
+	}
+}
+
+// nextEpisode is the queued episode that came out first, so a backlog is
+// heard in order. onlyNow keeps to what the user asked for now.
+func (b *Brain) nextEpisode(onlyNow bool) (store.Episode, bool) {
+	queued, _ := b.S.Episodes(0, 1000, "queued")
+	for i := len(queued) - 1; i >= 0; i-- {
+		if !onlyNow || b.askedNow(episodesNow, queued[i].ID) {
+			return queued[i], true
+		}
+	}
+	return store.Episode{}, false
+}
+
+// listenAsleep listens on while she sleeps, with the sleeper model that
+// is already loaded. The caller holds the model. A message stops it
+// between episodes.
+func (b *Brain) listenAsleep(ctx context.Context) {
+	if b.PodDir == "" || !b.Cfg.Get().Podcasts || !b.podBusy.CompareAndSwap(false, true) {
+		return
+	}
+	defer b.podBusy.Store(false)
+	b.requeueStuck()
+	until := time.Now().Add(podSleepFor)
+	for time.Now().Before(until) && b.wanted.Load() == 0 && ctx.Err() == nil {
+		e, ok := b.nextEpisode(false)
+		if !ok {
 			return
 		}
-		// Oldest first, so a backlog is heard in the order it came out.
-		b.listen(ctx, queued[len(queued)-1])
-	}()
+		b.listen(ctx, e, true)
+	}
 }
 
 func (b *Brain) failEpisode(e store.Episode, err error) {
@@ -474,7 +522,8 @@ func (b *Brain) failEpisode(e store.Episode, err error) {
 }
 
 // listen takes one episode from audio to understanding.
-func (b *Brain) listen(ctx context.Context, e store.Episode) {
+// Asleep, the caller holds the model and the sleeper takes the notes.
+func (b *Brain) listen(ctx context.Context, e store.Episode, asleep bool) {
 	feed, _ := b.S.GetFeed(e.FeedID)
 	cfg := b.Cfg.Get()
 	e.StartedAt, e.Error = b.Now(), ""
@@ -535,7 +584,7 @@ func (b *Brain) listen(ctx context.Context, e store.Episode) {
 	for i := 0; i < parts; i++ {
 		stage("reading", fmt.Sprintf("part %d of %d", i+1, parts))
 		chunk := strings.Join(words[i*podChunkWords:min((i+1)*podChunkWords, len(words))], " ")
-		notes, err := b.readPart(ctx, cfg, feed, e, chunk, i+1, parts)
+		notes, err := b.readPart(ctx, cfg, feed, e, chunk, i+1, parts, asleep)
 		if err != nil {
 			// One part she could not make sense of is not the episode.
 			b.Log.Printf("podcasts: part %d of %q: %v", i+1, e.Title, err)
@@ -551,12 +600,13 @@ func (b *Brain) listen(ctx context.Context, e store.Episode) {
 	}
 
 	stage("thinking", "")
-	if err := b.thinkOver(ctx, cfg, feed, &e); err != nil {
+	if err := b.thinkOver(ctx, cfg, feed, &e, asleep); err != nil {
 		b.failEpisode(e, err)
 		return
 	}
 	e.Status, e.StageNote, e.FinishedAt = "done", "", b.Now()
 	b.S.SaveEpisode(e)
+	b.setNow(episodesNow, e.ID, false)
 
 	source := episodeSource(feed, e)
 	// Listening again replaces what she kept the first time.
@@ -663,9 +713,14 @@ func (b *Brain) download(ctx context.Context, address, path string, progress fun
 // readPart has the small model note what one stretch of an episode said.
 // Each part takes the model for a few seconds and then lets go, so a
 // message from the user is answered between parts.
-func (b *Brain) readPart(ctx context.Context, cfg config.Config, feed store.Feed, e store.Episode, chunk string, i, n int) ([]string, error) {
-	b.turn.Lock()
-	defer b.turn.Unlock()
+func (b *Brain) readPart(ctx context.Context, cfg config.Config, feed store.Feed, e store.Episode, chunk string, i, n int, asleep bool) ([]string, error) {
+	tier := "worker"
+	if asleep {
+		tier = "sleeper" // the waking models are put away
+	} else {
+		b.turn.Lock()
+		defer b.turn.Unlock()
+	}
 	system := strings.Join([]string{
 		"You take notes on a podcast for someone who will read them later.",
 		"Show: " + feed.Title + ". Episode: " + e.Title + ".",
@@ -680,7 +735,7 @@ func (b *Brain) readPart(ctx context.Context, cfg config.Config, feed store.Feed
 		Notes []string `json:"notes"`
 	}
 	err := b.ask(ctx, llm.Request{
-		Tier: "worker", Role: "podcast-notes", System: system,
+		Tier: tier, Role: "podcast-notes", System: system,
 		Messages: []llm.Message{{Role: "user", Content: chunk}},
 		Schema:   podNotesSchema, MaxTokens: 500,
 	}, &out)
@@ -698,9 +753,11 @@ func (b *Brain) readPart(ctx context.Context, cfg config.Config, feed store.Feed
 
 // thinkOver turns her notes on an episode into what she keeps: a short
 // account of it, the things worth knowing, and one thing to bring up.
-func (b *Brain) thinkOver(ctx context.Context, cfg config.Config, feed store.Feed, e *store.Episode) error {
-	b.turn.Lock()
-	defer b.turn.Unlock()
+func (b *Brain) thinkOver(ctx context.Context, cfg config.Config, feed store.Feed, e *store.Episode, asleep bool) error {
+	if !asleep {
+		b.turn.Lock()
+		defer b.turn.Unlock()
+	}
 	var notes strings.Builder
 	// The notes have to fit beside the instructions; a very long episode
 	// is thinned evenly, not cut off at the end.
@@ -952,12 +1009,12 @@ func (b *Brain) listenToOlder(query string) (any, error) {
 	if top == 0 {
 		return nil, errors.New("no episode of the shows she follows matches \"" + query + "\"")
 	}
-	if err := b.QueueEpisode(best.ID); err != nil {
+	if err := b.QueueEpisode(best.ID, false); err != nil {
 		return nil, err
 	}
 	feed, _ := b.S.GetFeed(best.FeedID)
 	return map[string]any{"queued": true, "show": feed.Title, "episode": best.Title, "published": best.PublishedAt.Format("2 January 2006"),
-		"note": "It is in the queue. Listening takes a while: she has not heard it yet and cannot say what is in it."}, nil
+		"note": "It is in the queue. She listens to it tonight while she sleeps, unless the user presses Listen now on the Podcasts screen. She has not heard it yet and cannot say what is in it."}, nil
 }
 
 // PodcastsView is everything the app's podcast page shows.

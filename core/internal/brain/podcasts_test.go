@@ -103,6 +103,15 @@ func TestSheListensToANewShow(t *testing.T) {
 		t.Fatalf("only the newest episode should be queued: %+v", v.Queued)
 	}
 
+	// Awake, it waits for her sleep.
+	r.b.podcastTick(context.Background())
+	r.b.Wait()
+	if parts != 0 {
+		t.Fatal("awake, she should not listen to an episode nobody asked for now")
+	}
+	if err := r.b.QueueEpisode(v.Queued[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
 	r.b.podcastTick(context.Background())
 	r.b.Wait()
 
@@ -142,8 +151,22 @@ func TestSheListensToANewShow(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("the older episode should be waiting: %+v", all)
 	}
-	if err := r.b.QueueEpisode(all[0].ID); err != nil {
+	if err := r.b.QueueEpisode(all[0].ID, false); err != nil {
 		t.Fatal(err)
+	}
+	// Asleep, she listens to what is queued, with the sleeper.
+	tiers := map[string]bool{}
+	takeNotes := r.fake.Handlers["podcast-notes"]
+	r.fake.Handlers["podcast-notes"] = func(q llm.Request) (string, error) {
+		tiers[q.Tier] = true
+		return takeNotes(q)
+	}
+	r.b.listenAsleep(context.Background())
+	if v := r.b.Podcasts(); len(v.Done) != 2 || len(v.Queued) != 0 {
+		t.Fatalf("she should listen to the queued episode in her sleep: done=%d queued=%d", len(v.Done), len(v.Queued))
+	}
+	if len(tiers) != 1 || !tiers["sleeper"] {
+		t.Fatalf("asleep, only the sleeper takes notes: %v", tiers)
 	}
 }
 

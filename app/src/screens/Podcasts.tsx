@@ -135,10 +135,13 @@ function AllShows({ view, feed, act, open }: { view: PodcastsView; feed: (id: nu
       {view.current && <Listening feed={feed(view.current.feed_id)} e={view.current} />}
       {view.queued.length > 0 && (
         <section className="pod-section">
-          <h3 className="label">Up next</h3>
+          <h3 className="label">Tonight, while she sleeps</h3>
           <ul className="pod-rows">
             {view.queued.map((e) => (
               <EpisodeRow key={e.id} feed={feed(e.feed_id)} e={e}>
+                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen?now=1`, 'She starts on it now.')}>
+                  Listen now
+                </button>
                 <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/unqueue`, 'Taken out of the queue.')}>
                   Take out of queue
                 </button>
@@ -153,8 +156,11 @@ function AllShows({ view, feed, act, open }: { view: PodcastsView; feed: (id: nu
           <ul className="pod-rows">
             {view.failed.map((e) => (
               <EpisodeRow key={e.id} feed={feed(e.feed_id)} e={e}>
-                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen`, 'Added to Up next.')}>
-                  Try again
+                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen`, 'She will get to it tonight, while she sleeps.')}>
+                  Try again tonight
+                </button>
+                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen?now=1`, 'She starts on it now.')}>
+                  Try now
                 </button>
               </EpisodeRow>
             ))}
@@ -182,7 +188,7 @@ function AllShows({ view, feed, act, open }: { view: PodcastsView; feed: (id: nu
 
 const statusWord: Record<Episode['status'], string> = {
   waiting: 'not heard',
-  queued: 'up next',
+  queued: 'tonight',
   downloading: 'listening now',
   transcribing: 'listening now',
   reading: 'listening now',
@@ -256,13 +262,18 @@ function Show({ feed, act, open, onRemoved }: { feed: Feed; act: (path: string, 
             <EpisodeRow key={e.id} feed={feed} e={e}>
               <span className={`pod-status ${listening(e) ? 'live' : e.status}`}>{statusWord[e.status]}</span>
               {e.status === 'waiting' && (
-                <button type="button" className="primary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen`, 'Added to Up next.')}>
-                  Listen to this one
+                <button type="button" className="primary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen`, 'She will get to it tonight, while she sleeps.')}>
+                  Listen tonight
+                </button>
+              )}
+              {(e.status === 'waiting' || e.status === 'queued' || e.status === 'failed') && (
+                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen?now=1`, 'She starts on it now.')}>
+                  Listen now
                 </button>
               )}
               {e.status === 'failed' && (
-                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen`, 'Added to Up next.')}>
-                  Try again
+                <button type="button" className="secondary" onClick={() => act(`/api/podcasts/episodes/${e.id}/listen`, 'She will get to it tonight, while she sleeps.')}>
+                  Try again tonight
                 </button>
               )}
               {e.status === 'queued' && (
@@ -537,7 +548,7 @@ export function Podcasts() {
   const selected = view.kind === 'show' ? view.id : view.kind === 'episode' && view.from !== 'all' ? view.from : 0
 
   return (
-    <Screen eyebrow="What she listens to while you are busy" title="Podcasts" className="pod-screen">
+    <Screen eyebrow="What she listens to while she sleeps" title="Podcasts" className="pod-screen">
       <div className="pod-layout">
         <nav className="pod-rail" aria-label="Shows">
           <ul>

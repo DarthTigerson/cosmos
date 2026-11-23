@@ -43,7 +43,12 @@ type Brain struct {
 	// books off.
 	BookDir  string
 	bookBusy atomic.Bool
-	Log      *log.Logger
+	// Stops the book step being worked on, so a book can be removed
+	// while she is reading it; bookOn is which book that is.
+	bookMu     sync.Mutex
+	bookOn     int64
+	bookCancel context.CancelFunc
+	Log        *log.Logger
 	// Rest loads the models for her state and stops the others, so the
 	// sleeper and the waking models are never in memory together. Nil
 	// leaves the models alone.

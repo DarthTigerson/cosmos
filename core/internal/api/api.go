@@ -827,7 +827,7 @@ func (s *Server) episodeTranscript(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listenToEpisode(w http.ResponseWriter, r *http.Request) {
 	id, _ := pathID(r)
-	if err := s.B.QueueEpisode(id); err != nil {
+	if err := s.B.QueueEpisode(id, r.URL.Query().Get("now") == "1"); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
@@ -1211,7 +1211,7 @@ func (s *Server) book(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) removeBook(w http.ResponseWriter, r *http.Request) {
 	id, _ := pathID(r)
-	if err := s.B.RemoveBook(id); err != nil {
+	if err := s.B.RemoveBook(id, r.URL.Query().Get("forget") == "1"); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
@@ -1243,7 +1243,7 @@ func (s *Server) searchBook(w http.ResponseWriter, r *http.Request) {
 // more after it failed.
 func (s *Server) readBook(w http.ResponseWriter, r *http.Request) {
 	id, _ := pathID(r)
-	if err := s.B.QueueBook(id); err != nil {
+	if err := s.B.QueueBook(id, r.URL.Query().Get("now") == "1"); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}

@@ -102,7 +102,7 @@ function Reading({ book, paused }: { book: Book; paused: boolean }) {
         <div className="pod-now-top">
           <span className="sub strong">Reading now</span>
           <span className="sub">{meta(book)}</span>
-          {paused && <span className="pod-status live">paused · you are talking</span>}
+          {paused && <span className="pod-status live">paused · goes on while she sleeps</span>}
         </div>
         <h2>{book.title}</h2>
         <ol className="pod-stages">
@@ -179,11 +179,14 @@ function AllBooks({ view, act, reload, onProblem, open }: { view: BooksView; act
       {view.current && <Reading book={view.current} paused={view.paused} />}
       {view.queued.length > 0 && (
         <section className="pod-section">
-          <h3 className="label">Up next</h3>
+          <h3 className="label">Tonight, while she sleeps</h3>
           <ul className="pod-rows">
             {view.queued.map((b) => (
               <BookRow key={b.id} book={b}>
                 <ReadAs book={b} onDone={reload} onProblem={onProblem} />
+                <button type="button" className="secondary" onClick={() => act(`/api/books/${b.id}/read?now=1`, 'She starts on it now.')}>
+                  Read now
+                </button>
                 <button type="button" className="secondary" onClick={() => act(`/api/books/${b.id}/unqueue`, 'Taken out of the queue.')}>
                   Take out of queue
                 </button>
@@ -199,8 +202,11 @@ function AllBooks({ view, act, reload, onProblem, open }: { view: BooksView; act
             {waiting.map((b) => (
               <BookRow key={b.id} book={b}>
                 <ReadAs book={b} onDone={reload} onProblem={onProblem} />
-                <button type="button" className="primary" onClick={() => act(`/api/books/${b.id}/read`, 'Added to Up next.')}>
-                  Read this one
+                <button type="button" className="primary" onClick={() => act(`/api/books/${b.id}/read`, 'She will get to it tonight, while she sleeps.')}>
+                  Read tonight
+                </button>
+                <button type="button" className="secondary" onClick={() => act(`/api/books/${b.id}/read?now=1`, 'She starts on it now.')}>
+                  Read now
                 </button>
               </BookRow>
             ))}
@@ -213,8 +219,11 @@ function AllBooks({ view, act, reload, onProblem, open }: { view: BooksView; act
           <ul className="pod-rows">
             {view.failed.map((b) => (
               <BookRow key={b.id} book={b}>
-                <button type="button" className="secondary" onClick={() => act(`/api/books/${b.id}/read`, 'Added to Up next.')}>
-                  Try again
+                <button type="button" className="secondary" onClick={() => act(`/api/books/${b.id}/read`, 'She will get to it tonight, while she sleeps.')}>
+                  Try again tonight
+                </button>
+                <button type="button" className="secondary" onClick={() => act(`/api/books/${b.id}/read?now=1`, 'She starts on it now.')}>
+                  Try now
                 </button>
               </BookRow>
             ))}
@@ -227,7 +236,7 @@ function AllBooks({ view, act, reload, onProblem, open }: { view: BooksView; act
           <span className="sub">newest first</span>
         </div>
         {read.length === 0 ? (
-          <Empty>{q ? `Nothing she read matches “${query.trim()}”.` : view.books.length > 0 ? 'Nothing finished yet.' : 'Nothing yet. Add a book and she will start on it when you are quiet.'}</Empty>
+          <Empty>{q ? `Nothing she read matches “${query.trim()}”.` : view.books.length > 0 ? 'Nothing finished yet.' : 'Nothing yet. Add a book and she will read it while she sleeps.'}</Empty>
         ) : (
           <div className="pod-heard-grid">
             {read.map((b) => (
@@ -242,7 +251,7 @@ function AllBooks({ view, act, reload, onProblem, open }: { view: BooksView; act
 
 const pill: Record<Book['status'], string> = {
   waiting: 'not read',
-  queued: 'up next',
+  queued: 'tonight',
   opening: 'reading',
   reading: 'reading',
   digesting: 'reading',
@@ -361,8 +370,8 @@ function BookPage({ id, back, onRemoved }: { id: number; back: () => void; onRem
       .then(back)
       .catch((err: Error) => setProblem(err.message))
   const b = data?.book
-  const remove = () =>
-    void api(`/api/books/${id}`, { method: 'DELETE' })
+  const remove = (forget: boolean) =>
+    void api(`/api/books/${id}${forget ? '?forget=1' : ''}`, { method: 'DELETE' })
       .then(() => onRemoved(b?.title ?? 'the book'))
       .catch((err: Error) => setProblem(err.message))
   const count: Partial<Record<Section, number>> = { hers: kept('view').length, book: kept('read').length }
@@ -435,12 +444,17 @@ function BookPage({ id, back, onRemoved }: { id: number; back: () => void; onRem
       </div>
       {confirm && b && (
         <div className="pod-confirm">
-          <span>Remove {b.title}? The book file goes. What she learned from it stays with her.</span>
+          <span>
+            Remove {b.title}?{reading(b) ? ' She stops reading it.' : ''} The book file goes. Keep what she learned from it, or forget it too.
+          </span>
           <button type="button" className="secondary" onClick={() => setConfirm(false)}>
             Keep it
           </button>
-          <button type="button" className="secondary danger" onClick={remove}>
+          <button type="button" className="secondary danger" onClick={() => remove(false)}>
             Remove book
+          </button>
+          <button type="button" className="secondary danger" onClick={() => remove(true)}>
+            Remove and forget
           </button>
         </div>
       )}
@@ -634,7 +648,7 @@ export function Books() {
                 }}
               />
             </label>
-            <p className="sub">She reads it straight through, but only while you are quiet or she is asleep. Books you add are ones you have read and trust, so she keeps what they say as knowledge, credited to the author.</p>
+            <p className="sub">She reads it straight through while she sleeps, or right away if you press Read now. Books you add are ones you have read and trust, so she keeps what they say as knowledge, credited to the author.</p>
           </div>
         </nav>
 

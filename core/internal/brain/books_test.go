@@ -116,7 +116,7 @@ func bookRig(t *testing.T) (*rig, *int) {
 	return r, &parts
 }
 
-func TestSheReadsABookWhenItIsQuiet(t *testing.T) {
+func TestAwakeSheReadsOnlyWhenAskedNow(t *testing.T) {
 	r, parts := bookRig(t)
 	book, err := r.b.AddBook(bytes.NewReader(testEPUB(t, nil)))
 	if err != nil {
@@ -129,15 +129,20 @@ func TestSheReadsABookWhenItIsQuiet(t *testing.T) {
 		t.Fatal("the same book twice should be refused")
 	}
 
-	// The user has just written: she waits.
-	r.b.S.AddEvent(store.Event{At: r.now.Add(-time.Minute), Kind: "user_msg", Actor: "Thomas", Text: "hi"})
+	// Awake, a book waits for her sleep, however quiet it is.
+	r.now = r.now.Add(time.Hour)
 	r.b.bookTick(context.Background())
 	r.b.Wait()
 	if *parts != 0 {
-		t.Fatal("she should not read while the user is talking")
+		t.Fatal("awake, she should not read a book nobody asked for now")
+	}
+	if v := r.b.Books(); v.Paused {
+		t.Fatal("a book not yet begun is not paused")
 	}
 
-	r.now = r.now.Add(time.Hour)
+	if err := r.b.QueueBook(book.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	r.b.bookTick(context.Background())
 	r.b.Wait()
 	v := r.b.Books()
@@ -189,7 +194,7 @@ func TestSheReadsABookWhenItIsQuiet(t *testing.T) {
 	}
 
 	// Reading again replaces what she kept.
-	if err := r.b.QueueBook(done.ID); err != nil {
+	if err := r.b.QueueBook(done.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	r.b.bookTick(context.Background())
@@ -197,11 +202,45 @@ func TestSheReadsABookWhenItIsQuiet(t *testing.T) {
 	if kept := r.b.BookMemories(done); len(kept) != 3 {
 		t.Fatalf("a second reading should replace the first: %d kept", len(kept))
 	}
-	if err := r.b.RemoveBook(done.ID); err != nil {
+	if err := r.b.RemoveBook(done.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	if kept := r.b.BookMemories(done); len(kept) != 3 {
 		t.Fatal("what she learned stays after the book is removed")
+	}
+}
+
+func TestABookCanBeRemovedWhileSheReadsIt(t *testing.T) {
+	r, _ := bookRig(t)
+	book, err := r.b.AddBook(bytes.NewReader(testEPUB(t, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := r.fake.Handlers["book-notes"]
+	removed := false
+	r.fake.Handlers["book-notes"] = func(q llm.Request) (string, error) {
+		if !removed {
+			removed = true
+			// The wrong book: taken away in the middle of a part.
+			if err := r.b.RemoveBook(book.ID, true); err != nil {
+				t.Errorf("removing a book she is reading: %v", err)
+			}
+		}
+		return notes(q)
+	}
+	r.b.readAsleep(context.Background())
+	if !removed {
+		t.Fatal("she never started reading")
+	}
+	if _, ok := r.b.S.GetBook(book.ID); ok {
+		t.Fatal("the book came back after it was removed")
+	}
+	v := r.b.Books()
+	if len(v.Done)+len(v.Failed)+len(v.Books) != 0 {
+		t.Fatalf("nothing of the book should be left: %+v", v)
+	}
+	if kept := r.b.BookMemories(book); len(kept) != 0 {
+		t.Fatalf("a forgotten book left memories: %+v", kept)
 	}
 }
 
