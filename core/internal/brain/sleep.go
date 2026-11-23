@@ -240,14 +240,15 @@ func (b *Brain) sleepLocked(ctx context.Context) (SleepReport, error) {
 		"- reflections: one or two things you now understand that you did not this morning: something concrete about " + cfg.UserName + ", or about how to be better company for them. One plain sentence each, in everyday words. No poetry, no statements about silence, safety or your purpose. For each, evidence lists the numbers of the lines of your day it comes from; a reflection you cannot point to a line for does not belong here. importance 1 to 5.",
 		"- share: one thing you want to say or ask " + cfg.UserName + " in the morning, in one plain sentence, or \"\" if there is none worth it. Most nights it is \"\".",
 		"- wonder: up to two questions you would like to ask " + cfg.UserName + " some time, about something in their life that came up today and that you do not know: who someone is, what they do, how something turned out, what they like. Ask the way a friend would: one short, plain question about something real. Good: \"What do you do for work?\", \"Who is Rex?\", \"How long have you been diving?\" Bad: \"What does that mean to you?\", or anything about feelings behind a word. Give why you want to know. Never ask what is already in what you know. An empty list is fine.",
-		"- proposals: up to three changes to yourself, only where today gives a concrete reason. Do not repeat a declined proposal.",
+		"- proposals: up to three changes to yourself, only where today gives a concrete reason. Do not repeat a declined proposal. A declined proposal means " + cfg.UserName + " said no to it: the opposite stands, so never read it as them wanting what it says.",
 		`  kind "value": target is the number of the value to change, or "new". after is the new wording.`,
 		`  kind "writing": target is "". after is one instruction for how you write.`,
 		`  kind "planning": target is an intent (weather, calendar, memory, people, chat). after is "once" or "steps".`,
+		`  kind "bug": something in the platform you run on that keeps failing, from "What failed today" below; only one that failed more than once, or that ` + cfg.UserName + ` noticed. target is "". after is one plain line for ` + cfg.UserName + ` to fix it from: which step failed, how often, and the reason it gave. Never a bug about ` + cfg.UserName + ` or about how you talk.`,
 		"  reason: what happened today that makes you want this.",
 		"Most nights there is nothing to propose. An empty list is a good answer.",
 	}, "\n")
-	user := "Your day:\n" + stream.String() + "\nHow your plans went:\n" + runStats(runs) + "\nWhen you reached out first:\n" + reach.String()
+	user := "Your day:\n" + stream.String() + "\nHow your plans went:\n" + runStats(runs) + "\nWhat failed today:\n" + failureNotes(runs) + "\nWhen you reached out first:\n" + reach.String()
 
 	var out reflectOut
 	if err := b.ask(ctx, llm.Request{
@@ -358,7 +359,7 @@ func (b *Brain) checkProposal(kind, target, after, reason string, vals []store.V
 		}
 		p.Target, p.Before = strconv.FormatInt(v.ID, 10), v.Text
 		return p, true
-	case "writing":
+	case "writing", "bug":
 		return p, true
 	case "planning":
 		target = strings.ToLower(target)
@@ -385,6 +386,10 @@ func (b *Brain) checkProposal(kind, target, after, reason string, vals []store.V
 	return p, false
 }
 
+// bugList is where the bugs she reports go once approved: the list
+// the user keeps for work on the platform she runs on.
+const bugList = "cosmos platform tasks"
+
 // DecideProposal applies or declines a pending proposal.
 func (b *Brain) DecideProposal(id int64, approve bool) (store.Proposal, error) {
 	p, err := b.S.GetProposal(id)
@@ -396,9 +401,26 @@ func (b *Brain) DecideProposal(id int64, approve bool) (store.Proposal, error) {
 	}
 	now := b.Now()
 	cfg := b.Cfg.Get()
+	if p.Kind == "bug" {
+		// A bug report is not a rule about her: approved, it goes on the
+		// list of things to fix in the platform.
+		status, text := "declined", cfg.UserName+" did not take up a bug I reported: "+clip(p.After, 160)
+		if approve {
+			if _, err := b.S.AddListItem(listName(bugList), "Bug: "+clip(p.After, 200), now); err != nil {
+				return p, err
+			}
+			b.Bus.Publish("lists", nil)
+			status, text = "approved", cfg.UserName+" put a bug I reported on the "+bugList+" list: "+clip(p.After, 160)
+		}
+		b.S.DecideProposal(id, status, now)
+		b.S.AddEvent(store.Event{At: now, Kind: "system", Actor: cfg.UserName, Text: text, Importance: 3})
+		p.Status = status
+		b.Bus.Publish("proposals", nil)
+		return p, nil
+	}
 	if !approve {
 		b.S.DecideProposal(id, "declined", now)
-		b.S.AddEvent(store.Event{At: now, Kind: "system", Actor: cfg.UserName, Text: cfg.UserName + " declined my proposed change: " + clip(p.After, 160), Importance: 3})
+		b.S.AddEvent(store.Event{At: now, Kind: "system", Actor: cfg.UserName, Text: cfg.UserName + " said no to a rule I proposed, so this is NOT how they want me to behave: " + clip(p.After, 160), Importance: 3})
 		p.Status = "declined"
 		b.Bus.Publish("proposals", nil)
 		return p, nil
@@ -432,7 +454,7 @@ func (b *Brain) DecideProposal(id int64, approve bool) (store.Proposal, error) {
 		return p, err
 	}
 	b.S.DecideProposal(id, "approved", now)
-	b.S.AddEvent(store.Event{At: now, Kind: "system", Actor: cfg.UserName, Text: cfg.UserName + " approved my change: " + clip(p.After, 160), Importance: 4})
+	b.S.AddEvent(store.Event{At: now, Kind: "system", Actor: cfg.UserName, Text: cfg.UserName + " said yes to a change I proposed, so this is now how they want me to behave: " + clip(p.After, 160), Importance: 4})
 	p.Status = "approved"
 	b.Bus.Publish("proposals", nil)
 	return p, nil

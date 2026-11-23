@@ -1,11 +1,33 @@
-import { type FormEvent, type KeyboardEvent, type ReactNode, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, useLoad, useSignals } from '../api'
 import { Avatar, type HerView } from '../avatar/Avatar'
 import { asksToLook, glance } from '../avatar/glance'
-import { FaceAsk } from '../faces'
+import { FaceAsk, FacePicture } from '../faces'
 import { clock, longDate, when } from '../format'
 import { Linked, Meters, Problem } from '../parts'
 import type { Run, State, Step, StepSignal, StreamEvent, Today } from '../types'
+
+// At most this many pictures go with one message, each no bigger than this
+// on its long side: enough for her to read, small enough to send.
+const maxPictures = 4
+const pictureSide = 1280
+
+// shrink turns a picture file into a JPEG data: address, as glance does for
+// the camera, or null when it cannot be read as a picture.
+async function shrink(file: File): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, pictureSide / Math.max(bitmap.width, bitmap.height))
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, Math.round(bitmap.width * scale))
+    c.height = Math.max(1, Math.round(bitmap.height * scale))
+    c.getContext('2d')!.drawImage(bitmap, 0, 0, c.width, c.height)
+    bitmap.close()
+    return c.toDataURL('image/jpeg', 0.85)
+  } catch {
+    return null
+  }
+}
 
 const tierLabel: Record<Step['tier'], string> = { main: 'main model', worker: 'worker', tool: 'tool', code: 'check', voice: 'voice' }
 
@@ -141,6 +163,10 @@ export function Nova({ state }: { state: State | null }) {
   const queued = useRef<string[]>([])
   const queuedAloud = useRef(false)
   const queuedHeard = useRef(0)
+  const queuedPictures = useRef<string[]>([])
+  // Pictures chosen for the next message, as data: addresses.
+  const [pictures, setPictures] = useState<string[]>([])
+  const picker = useRef<HTMLInputElement>(null)
   const [sendError, setSendError] = useState('')
   const [live, setLive] = useState<LiveStep[] | null>(null)
   // Her reply as she writes it, before the finished one arrives.
@@ -239,19 +265,48 @@ export function Nova({ state }: { state: State | null }) {
   async function send(e: FormEvent) {
     e.preventDefault()
     const typed = text.trim()
-    if (!typed) return
+    if (!typed && pictures.length === 0) return
+    const attached = pictures
     setText('')
-    await say(typed)
+    setPictures([])
+    await say(typed || '(picture)', false, 0, attached)
+  }
+
+  // attach adds picture files to the next message, up to the most one
+  // message can carry.
+  async function attach(files: File[]) {
+    const shots = files.filter((f) => f.type.startsWith('image/'))
+    if (shots.length === 0) return
+    const read = (await Promise.all(shots.map(shrink))).filter((p): p is string => !!p)
+    setPictures((old) => [...old, ...read].slice(0, maxPictures))
+  }
+
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.items)
+      .filter((i) => i.kind === 'file' && i.type.startsWith('image/'))
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => !!f)
+    if (files.length === 0) return
+    // Words pasted alongside still paste as words; only the pictures are taken.
+    e.preventDefault()
+    void attach(files)
+  }
+
+  function onDrop(e: DragEvent<HTMLFormElement>) {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    void attach(Array.from(e.dataTransfer.files))
   }
 
   // say sends words to her, typed or spoken. While she is busy they
   // wait, and everything that waited goes as one message.
-  async function say(say: string, spoken = false, heard = 0) {
+  async function say(say: string, spoken = false, heard = 0, shots: string[] = []) {
     if (!say) return
     if (busy.current) {
       queued.current = [...queued.current, say]
       queuedAloud.current ||= spoken
       if (heard) queuedHeard.current = heard
+      queuedPictures.current = [...queuedPictures.current, ...shots].slice(0, maxPictures)
       setWaiting(queued.current)
       return
     }
@@ -263,11 +318,12 @@ export function Nova({ state }: { state: State | null }) {
     // The number the call gave what was said, so its timings go with
     // the reply.
     let from = heard
+    let images = shots
     while (next) {
       // Asked to look, she takes one still from her camera, if it is on.
       const seen = asksToLook(next) ? glance() : null
       try {
-        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud, ...(seen ? { seen } : {}), ...(from ? { heard: from } : {}) } })
+        await api('/api/message', { method: 'POST', body: { text: next, spoken: aloud, ...(seen ? { seen } : {}), ...(images.length ? { images } : {}), ...(from ? { heard: from } : {}) } })
       } catch (err) {
         setSendError((err as Error).message)
       }
@@ -276,6 +332,8 @@ export function Nova({ state }: { state: State | null }) {
       next = queued.current.join(' ')
       aloud = queuedAloud.current
       from = queuedHeard.current
+      images = queuedPictures.current
+      queuedPictures.current = []
       queued.current = []
       queuedAloud.current = false
       queuedHeard.current = 0
@@ -361,6 +419,13 @@ export function Nova({ state }: { state: State | null }) {
           {messages.map((m) =>
             m.kind === 'user_msg' ? (
               <div className="bubble" key={m.id}>
+                {m.meta?.image_ids && m.meta.image_ids.length > 0 && (
+                  <div className="bubble-pics">
+                    {m.meta.image_ids.map((id) => (
+                      <FacePicture key={id} id={id} size={96} alt="A picture you sent" />
+                    ))}
+                  </div>
+                )}
                 <Linked text={m.text} />
               </div>
             ) : m.kind === 'initiative' ? (
@@ -431,7 +496,35 @@ export function Nova({ state }: { state: State | null }) {
           <div ref={end} />
         </div>
 
-        <form className="composer" onSubmit={send}>
+        <form className="composer" onSubmit={send} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+          {pictures.length > 0 && (
+            <ul className="attached" aria-label="Pictures to send">
+              {pictures.map((p, i) => (
+                <li key={i}>
+                  <img src={p} alt={`Picture ${i + 1} to send`} />
+                  <button type="button" aria-label={`Remove picture ${i + 1}`} onClick={() => setPictures(pictures.filter((_, j) => j !== i))}>
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <input
+            ref={picker}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              void attach(Array.from(e.target.files ?? []))
+              e.target.value = ''
+            }}
+          />
+          <button type="button" className="attach" title="Attach a picture" aria-label="Attach a picture" disabled={pictures.length >= maxPictures} onClick={() => picker.current?.click()}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 11.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9-9a3.7 3.7 0 015.2 5.2l-9 9a1.8 1.8 0 01-2.6-2.6l8.3-8.3" />
+            </svg>
+          </button>
           <label htmlFor="say" className="visually-hidden">
             Message {name}
           </label>
@@ -445,8 +538,9 @@ export function Nova({ state }: { state: State | null }) {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
+            onPaste={onPaste}
           />
-          <button type="submit" className="primary" disabled={!text.trim()}>
+          <button type="submit" className="primary" disabled={!text.trim() && pictures.length === 0}>
             Send
           </button>
         </form>

@@ -29,6 +29,8 @@ const stepShapes = `{"anyOf":[
  {"type":"object","properties":{"tool":{"const":"podcasts.heard"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"podcasts.listen"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
  {"type":"object","properties":{"tool":{"const":"podcasts.find"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
+ {"type":"object","properties":{"tool":{"const":"books.read"},"query":{"type":"string","maxLength":120}},"required":["tool","query"]},
+ {"type":"object","properties":{"tool":{"const":"self.check"}},"required":["tool"]},
  {"type":"object","properties":{"tool":{"const":"lists.add"},"list":{"type":"string","maxLength":40},"items":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"string","maxLength":60}}},"required":["tool","list","items"]},
  {"type":"object","properties":{"tool":{"const":"lists.remove"},"list":{"type":"string","maxLength":40},"items":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"string","maxLength":60}}},"required":["tool","list","items"]},
  {"type":"object","properties":{"tool":{"const":"lists.show"},"list":{"type":"string","maxLength":40}},"required":["tool","list"]},
@@ -39,7 +41,7 @@ var planSchema = planSchemaWith(stepShapes)
 
 func planSchemaWith(shapes string) json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
- "intent":{"type":"string","enum":["chat","weather","calendar","memory","people","web","lists","podcasts","other"]},
+ "intent":{"type":"string","enum":["chat","weather","calendar","memory","people","web","lists","podcasts","books","self","other"]},
  "mode":{"type":"string","enum":["once","steps"]},
  "steps":{"type":"array","maxItems":4,"items":` + shapes + `}},
  "required":["intent","mode","steps"]}`)
@@ -166,7 +168,7 @@ var reflectSchema = json.RawMessage(`{"type":"object","properties":{
    "why":{"type":"string","maxLength":160}},
   "required":["question","why"]}},
  "proposals":{"type":"array","maxItems":3,"items":{"type":"object","properties":{
-   "kind":{"type":"string","enum":["value","writing","planning"]},
+   "kind":{"type":"string","enum":["value","writing","planning","bug"]},
    "target":{"type":"string"},
    "reason":{"type":"string"},
    "after":{"type":"string"}},

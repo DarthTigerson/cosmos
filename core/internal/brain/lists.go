@@ -48,6 +48,38 @@ func saidBy(item, said string) bool {
 	return len(words) > 0
 }
 
+// mostlySaid is the looser test for an item they asked for in so many
+// words but that the planner wrote in its own: "secure balcony items
+// (wind 25 kph)" for "add that to the to-do". What is in brackets goes,
+// and at least half the words that carry meaning must be theirs. It
+// returns the item as it should be written down.
+func mostlySaid(item, said string) (string, bool) {
+	for {
+		open := strings.Index(item, "(")
+		end := strings.Index(item, ")")
+		if open < 0 || end < open {
+			break
+		}
+		item = strings.TrimSpace(item[:open] + " " + item[end+1:])
+	}
+	have := map[string]bool{}
+	for _, t := range tokens(said) {
+		have[t] = true
+		have[strings.TrimSuffix(t, "s")] = true
+	}
+	words := tokens(item)
+	shared := 0
+	for _, t := range words {
+		if have[t] || have[strings.TrimSuffix(t, "s")] {
+			shared++
+		}
+	}
+	if len(unsupportedNumbers(item, said)) > 0 {
+		return "", false
+	}
+	return item, shared >= 1 && shared >= len(words)/2
+}
+
 // asksForList reports whether a message asks for something to be
 // written on a list, or carries on from one that did ("oh and coffee
 // too").
@@ -87,8 +119,15 @@ func (b *Brain) listAdd(c StepCall, said string) (any, error) {
 	added, already := []string{}, []string{}
 	for _, item := range c.Items {
 		item = strings.TrimSpace(strings.Trim(strings.TrimSpace(item), ".,;"))
-		if item == "" || !saidBy(item, said) {
+		if item == "" {
 			continue
+		}
+		if !saidBy(item, said) {
+			loose, ok := mostlySaid(item, said)
+			if !ok {
+				continue
+			}
+			item = loose
 		}
 		dup := false
 		for _, h := range have {

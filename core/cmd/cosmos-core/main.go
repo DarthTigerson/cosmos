@@ -82,6 +82,14 @@ func main() {
 	b := brain.New(s, client, cfg)
 	b.Log = logger
 	b.Rest = launch.Rest
+	b.Health = func(ctx context.Context) map[string]brain.ServerHealth {
+		out := map[string]brain.ServerHealth{}
+		for _, tier := range []string{"main", "worker", "sleeper", "embed"} {
+			st := launch.Status(ctx, tier)
+			out[tier] = brain.ServerHealth{State: st.State, Error: st.Error}
+		}
+		return out
+	}
 	b.E = client
 	b.PodDir = filepath.Join(*data, "podcasts")
 	b.BookDir = filepath.Join(*data, "books")

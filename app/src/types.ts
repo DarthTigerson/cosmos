@@ -30,6 +30,8 @@ export interface EventMeta {
   about?: string
   // A picture that goes with it, and what answering it settles.
   image_id?: number
+  // Pictures the user sent with a message.
+  image_ids?: number[]
   subject?: string
 }
 
@@ -184,7 +186,7 @@ export interface Voice {
 
 export interface Proposal {
   id: number
-  kind: 'value' | 'writing' | 'planning'
+  kind: 'value' | 'writing' | 'planning' | 'bug'
   target: string
   before: string
   after: string

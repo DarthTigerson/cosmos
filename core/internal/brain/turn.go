@@ -36,6 +36,10 @@ type Said struct {
 	// as a data: URI. Only the model on this computer sees it; it is not
 	// stored with the message.
 	Seen string
+	// Pictures are images the user pasted or dropped into the chat, as
+	// data: URIs. The model sees them with this message only; the chat
+	// keeps its own copy of each, so it can show them again later.
+	Pictures []string
 	// Heard is how hearing it went: from the end of what was said to the
 	// words. They begin the run's steps.
 	Heard []store.Step
@@ -115,7 +119,7 @@ type plan struct {
 	Steps  []StepCall `json:"steps"`
 }
 
-var intents = []string{"chat", "weather", "calendar", "memory", "people", "web", "lists", "podcasts", "books", "other"}
+var intents = []string{"chat", "weather", "calendar", "memory", "people", "web", "lists", "podcasts", "books", "self", "other"}
 
 // dateTable spells out today and the next week so no model has to work
 // out a date from "next Thursday".
@@ -169,7 +173,7 @@ func (b *Brain) routeSystem(cfg config.Config) string {
 		"",
 		dateTable(now),
 		`Every step has all the fields of its tool. Leave a field as "" or 0 when it does not apply.`,
-		"intent: one of chat, weather, calendar, memory, people, web, lists, podcasts, books, other.",
+		"intent: one of chat, weather, calendar, memory, people, web, lists, podcasts, books, self, other.",
 		`mode: "once" when every step can be listed now. "steps" when a later step depends on an earlier result, such as removing an event that first has to be found.`,
 		"",
 		"Examples:",
@@ -205,6 +209,9 @@ func (b *Brain) routeSystem(cfg config.Config) string {
 		`"Is it safe to delete the old log files by hand on the database server?" -> {"intent":"web","mode":"once","steps":[{"tool":"web.search","query":"safe to delete old database log files manually"}]}`,
 		`"The server is down and I need options, think with me" -> {"intent":"web","mode":"once","steps":[{"tool":"web.search","query":"server down recovery options"}]}`,
 		`"What do you think I should cook tonight?" -> {"intent":"chat","mode":"once","steps":[]}`,
+		`"Your logs say you are feeling uneasy, what is wrong?" -> {"intent":"self","mode":"once","steps":[{"tool":"self.check"}]}`,
+		`"Did something go wrong just now? It didn't save" -> {"intent":"self","mode":"once","steps":[{"tool":"self.check"}]}`,
+		`"How are you feeling today?" -> {"intent":"chat","mode":"once","steps":[]}`,
 		`"Cancel my dentist appointment" -> {"intent":"calendar","mode":"steps","steps":[{"tool":"calendar.list","from":"` + today + `","to":"` + week + `"}]}`,
 	}, "\n")
 }
@@ -555,7 +562,7 @@ func endedWithQuestion(recent []store.Event) bool {
 func carriedOut(facts []Fact) bool {
 	for _, f := range facts {
 		// A lookup that found nothing is a good reason to ask.
-		if f.Error != "" || !(strings.HasPrefix(f.Tool, "calendar.") || strings.HasPrefix(f.Tool, "weather.") || strings.HasPrefix(f.Tool, "web.") || strings.HasPrefix(f.Tool, "lists.") || strings.HasPrefix(f.Tool, "podcasts.") || strings.HasPrefix(f.Tool, "books.") || strings.HasPrefix(f.Tool, "mcp.")) {
+		if f.Error != "" || !(strings.HasPrefix(f.Tool, "calendar.") || strings.HasPrefix(f.Tool, "weather.") || strings.HasPrefix(f.Tool, "web.") || strings.HasPrefix(f.Tool, "lists.") || strings.HasPrefix(f.Tool, "podcasts.") || strings.HasPrefix(f.Tool, "books.") || strings.HasPrefix(f.Tool, "self.") || strings.HasPrefix(f.Tool, "mcp.")) {
 			return false
 		}
 		if m, ok := f.Result.(map[string]any); ok && m["added"] == false {
@@ -816,9 +823,11 @@ func (b *Brain) writerParts(cfg config.Config, mood Mood, query string) (fixed, 
 		"- Give a web address or feed only when it is written in FACTS or the conversation, copied character for character. Never build, guess or complete one: if FACTS has no address, say you could not find it.",
 		"- You can check the weather, look things up online, read and change "+cfg.UserName+"'s calendar, set reminders, keep their lists (shopping, to-do), listen to the podcasts they follow, read the books they give you, and remember what they tell you. That work is done before you write, and what happened is under FACTS. Never say you are unable to do these things.",
 		"- On a technical or safety question, do not guess. Answer from FACTS; if FACTS does not settle it, say you are not sure. Being corrected does not make the opposite true: check again before agreeing.",
-		"- You only have their words. You cannot see or hear them, so never say how they look or sound.",
+		"- Unless a picture comes with their message, you only have their words: you cannot see or hear them, so never say how they look or sound. When a picture does come, describe only what is in it.",
 		"- Always say \"I\". Never refer to yourself as "+cfg.CompanionName+".",
 		"- Do not end every reply with a question. After doing something they asked for, confirm it and stop. Ask only when you actually want to know.",
+		"- Do not praise every message. Saying you are proud of them is for something big, and rare. Say what you think, even when it is not what they hope to hear.",
+		"- Say a thing once. Do not bring up again something you have already raised (a chore, a habit, a worry) unless they do.",
 		"- Usually one to three sentences. No greeting formulas, no \"how can I help\", no reading out everything in FACTS.",
 		"- A message may end with NOTES TO SELF and FACTS. They are your own notes for that reply: "+cfg.UserName+" did not write them and cannot see them. Use them; never answer them, mention them or write notes of your own.",
 	)
@@ -908,9 +917,57 @@ func (b *Brain) compose(ctx context.Context, t *trace, cfg config.Config, mood M
 	} else {
 		msgs = append(msgs, llm.Message{Role: "user", Content: ask})
 	}
-	if seen := saidOf(ctx).Seen; seen != "" && cfg.Sees() {
-		msgs[len(msgs)-1].Images = []string{seen}
+	if said := saidOf(ctx); cfg.Sees() {
+		// The camera's still and the pasted pictures ride together on the
+		// newest message.
+		var pics []string
+		if said.Seen != "" {
+			pics = append(pics, said.Seen)
+		}
+		pics = append(pics, said.Pictures...)
+		if len(pics) > 0 {
+			msgs[len(msgs)-1].Images = pics
+		}
 	}
+
+	// What she has already asked, in this thread or as one of the
+	// questions she was holding, is not asked again.
+	asked := []string{}
+	for _, e := range recent {
+		if e.Kind == "nova_msg" || e.Kind == "initiative" {
+			asked = append(asked, questionsIn(e.Text)...)
+		}
+	}
+	if held, err := b.S.Intentions("sent", "done"); err == nil {
+		for _, i := range held {
+			if i.Kind == "curiosity" {
+				asked = append(asked, i.Text)
+			}
+		}
+	}
+	// What she keeps bringing up, across sessions, that they have not
+	// raised since. Twice is a hint to let it go; three times and the
+	// sentence is taken out.
+	replies := []string{}
+	if evs, err := b.S.RecentEvents(10, "nova_msg", "initiative"); err == nil {
+		for _, e := range evs {
+			if b.Now().Sub(e.At) < 24*time.Hour {
+				replies = append(replies, e.Text)
+			}
+		}
+	}
+	theirs := text
+	for i := len(recent) - 1; i >= 0; i-- {
+		if recent[i].Kind == "user_msg" {
+			theirs += " " + recent[i].Text
+			break
+		}
+	}
+	skip := []string{cfg.UserName, cfg.CompanionName, factsJSON}
+	if worn := staleTopics(replies, theirs, skip, 2); len(worn) > 0 {
+		msgs[len(msgs)-1].Content += "\nYou have already brought these up in recent replies, and " + cfg.UserName + " has not raised them since: " + strings.Join(worn, ", ") + ". Do not bring them up again unless they do."
+	}
+	stale := staleTopics(replies, theirs, skip, 3)
 
 	feedback := ""
 	draft := ""
@@ -962,6 +1019,7 @@ func (b *Brain) compose(ctx context.Context, t *trace, cfg config.Config, mood M
 				draft = dropTackedQuestion(draft)
 			}
 			draft = b.dropBorrowedNames(draft)
+			draft = dropStale(dropAskedQuestions(draft, asked), stale)
 			if draft != "" {
 				best = draft
 			}
@@ -981,6 +1039,24 @@ func (b *Brain) compose(ctx context.Context, t *trace, cfg config.Config, mood M
 			// she can get wrong: the user stops checking.
 			if factsJSON == "" && claimsWork(draft) {
 				feedback = "it says you looked something up, added something or changed something, but none of your tools ran in this reply. Nothing was done. Say that plainly, or say what you would need."
+				return "", errors.New(feedback)
+			}
+			// Tools ran, but none that changes anything worked: "I've added
+			// it" over a failed lists.add went out three times in a row.
+			if factsJSON != "" && claimsChange(draft) && !changedSomething(facts) {
+				why := toolErrors(facts)
+				if why == "" {
+					why = "no tool that changes things ran"
+				}
+				feedback = "it says you added or changed something, but nothing was changed (" + why + "). Say plainly that it did not work and what went wrong, or what you would need."
+				return "", errors.New(feedback)
+			}
+			if saidOf(ctx).Seen == "" && len(saidOf(ctx).Pictures) == 0 && claimsSenses(draft) {
+				feedback = "it says you can see or hear something right now, but no picture or sound came with this message. You only have their words."
+				return "", errors.New(feedback)
+			}
+			if unfinished(draft) {
+				feedback = "it stops in the middle of a sentence. Finish it. If what you meant to give is not in FACTS, say you could not find it."
 				return "", errors.New(feedback)
 			}
 			// An address she makes up looks just as real as one she found,
@@ -1003,7 +1079,7 @@ func (b *Brain) compose(ctx context.Context, t *trace, cfg config.Config, mood M
 		// Web results are full of names she has every right to repeat
 		// ("Stack Overflow" for stackoverflow.com); the check is about
 		// the user's own life and is skipped for looked-up answers.
-		if feedback == "" && cfg.VerifyClaims && attempt == 0 && !strings.Contains(factsJSON, "\"web.") && unsupportedClaim(draft, told) != "" {
+		if feedback == "" && cfg.VerifyClaims && attempt == 0 && !strings.Contains(factsJSON, "\"web.") && saidOf(ctx).Seen == "" && len(saidOf(ctx).Pictures) == 0 && unsupportedClaim(draft, told) != "" {
 			t.step("claims", "worker", func() (string, error) {
 				var v struct {
 					Invented string `json:"invented"`
@@ -1074,6 +1150,9 @@ func (b *Brain) compose(ctx context.Context, t *trace, cfg config.Config, mood M
 	if factsJSON == "" && claimsWork(best) {
 		best = withoutClaims(best)
 	}
+	if factsJSON != "" && claimsChange(best) && !changedSomething(facts) {
+		best = withoutChangeClaims(best)
+	}
 	// Nor is an address she made up: a dead link handed over as found.
 	for _, l := range unsupportedLinks(best, text, convo, factsJSON, known) {
 		best = strings.ReplaceAll(best, l, "(I left the address out: I couldn't confirm it)")
@@ -1112,7 +1191,10 @@ func unsupportedClaim(claim, told string) string {
 	for i, w := range words {
 		w = strings.Trim(w, ".,!?:;\"'()")
 		startsSentence := i == 0 || strings.HasSuffix(words[i-1], ".") || strings.HasSuffix(words[i-1], "!") || strings.HasSuffix(words[i-1], "?")
-		if len(w) >= 3 && w[0] >= 'A' && w[0] <= 'Z' && !startsSentence && !ordinaryWord[strings.ToLower(w)] && !strings.Contains(have, " "+norm(w)+" ") {
+		// "I'm" and "I've" are her, not a name: taken for one, they had a
+		// podcast feed address cut out of a reply as an invented fact.
+		self := strings.HasPrefix(w, "I'") || strings.HasPrefix(w, "I’")
+		if len(w) >= 3 && !self && w[0] >= 'A' && w[0] <= 'Z' && !startsSentence && !ordinaryWord[strings.ToLower(w)] && !strings.Contains(have, " "+norm(w)+" ") {
 			return w
 		}
 	}
@@ -1468,7 +1550,7 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	// to eight, instead of sliding by one every turn: the model's cache
 	// holds as long as the thread still starts at the same message.
 	recent, _ := b.S.SessionEvents(sess.ID, 8+sess.Messages%6, "user_msg", "nova_msg", "initiative")
-	userEv, err := b.S.AddEvent(store.Event{At: b.Now(), Kind: "user_msg", Actor: cfg.UserName, Text: text, SessionID: sess.ID})
+	userEv, err := b.S.AddEvent(store.Event{At: b.Now(), Kind: "user_msg", Actor: cfg.UserName, Text: text, SessionID: sess.ID, Meta: b.keepPasted(saidOf(ctx).Pictures)})
 	if err != nil {
 		return Reply{}, err
 	}
@@ -1493,6 +1575,12 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 	})
 	if ctx.Err() != nil {
 		return interrupted(t, started, p.Intent)
+	}
+	// "How strong is the wind?" was filed as chat, and she said she had no
+	// data while the forecast was one call away.
+	if len(p.Steps) == 0 && asksWeather(text) {
+		p.Intent = "weather"
+		p.Steps = []StepCall{{Tool: "weather.now"}}
 	}
 	mode := b.planningMode(cfg, p)
 	grounding := ""
@@ -1534,11 +1622,24 @@ func (b *Brain) HandleMessage(ctx context.Context, text string) (Reply, error) {
 			moment = strings.TrimSpace(moment + "\nYour camera is on, but you cannot make out pictures yet: you see that someone is there, not what they are showing you. If they want you to look at something, say so plainly.")
 		}
 	}
+	if len(saidOf(ctx).Pictures) > 0 {
+		if cfg.Sees() {
+			moment = strings.TrimSpace(moment + "\nThe pictures came with this message from " + cfg.UserName + ": they pasted them in the chat, they are not from your camera. Say what you actually see in them and nothing you cannot see. If something is unclear, say so.")
+		} else {
+			// The model was started without the part that reads pictures.
+			// She must not pretend.
+			moment = strings.TrimSpace(moment + "\nA picture came with this message, but you cannot make out pictures yet (the part of your model that reads them is not loaded). Say that plainly and never describe it.")
+		}
+	}
 	if said := saidOf(ctx); said.Aloud {
-		moment = strings.TrimSpace(moment + "\n" + cfg.UserName + " said this out loud and will hear your reply spoken, not read it. Talk the way you would across a room: two or three short sentences, nothing that only works on a screen. No lists, headings or symbols. Say numbers and times the way they are spoken. If you give a web address, put it alone on the last line and say it is in the chat.")
+		moment = strings.TrimSpace(moment + "\n" + cfg.UserName + " said this out loud and will hear your reply spoken, not read it. Talk the way you would across a room: two or three short sentences, nothing that only works on a screen. No lists, headings or symbols. Say numbers and times the way they are spoken. If you give a web address, put it alone on the last line and say it is in the chat. What you heard was written out by a microphone that mishears in a noisy room: if it makes no sense, or seems to come from a television or someone else, do not answer it as if it did; ask them to say it again.")
 		if said.Room != "" {
 			moment = strings.TrimSpace(moment + "\nWhat was being said around you just before (by " + cfg.UserName + " or others nearby; it may be misheard, and is not addressed to you):\n" + said.Room)
 		}
+	}
+	if p.Intent == "self" {
+		// Asked what is wrong with her, she used to blame caring too much.
+		moment = strings.TrimSpace(moment + "\nThey are asking how you yourself are running. Answer from FACTS, in plain words: what failed and why, in a sentence or two, and say so when nothing did. Every number comes from FACTS. Do not make up a cause, a feeling or a fix that FACTS does not show.")
 	}
 	if p.Intent == "web" {
 		// Left alone, she rounds off every looked-up answer with a remark
@@ -1897,6 +1998,8 @@ func sureness(cfg config.Config, facts []Fact, verified bool) (level, basis stri
 			add("from what you told me")
 		case strings.HasPrefix(f.Tool, "mcp."):
 			add("from your own tools")
+		case f.Tool == "self.check":
+			add("from my own records")
 		}
 	}
 	return level, strings.Join(from, ", ")

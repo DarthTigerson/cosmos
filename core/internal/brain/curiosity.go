@@ -26,15 +26,17 @@ func (b *Brain) wonder(cfg config.Config, question, why string) bool {
 	if question == "" || !strings.HasSuffix(question, "?") || !plainQuestion(question) {
 		return false
 	}
-	held, _ := b.S.Intentions("open", "sent")
+	held, _ := b.S.Intentions()
 	open := 0
+	now := b.Now()
 	for _, i := range held {
 		if i.Kind != "curiosity" {
 			continue
 		}
-		// The same question, or one on the same subject still waiting to
-		// be asked. One she already asked does not block a better one.
-		if norm(i.Text) == norm(question) || (i.Status == "open" && sharesSubject(cfg.UserName, i.Text, question)) {
+		// The same question, or one on the same subject: still waiting, or
+		// asked or settled within the keep window. Asking about the same
+		// thing again a few days later is nagging.
+		if norm(i.Text) == norm(question) || ((i.Status == "open" || now.Sub(i.CreatedAt) < curiosityKeeps) && sharesSubject(cfg.UserName, i.Text, question)) {
 			return false
 		}
 		if i.Status == "open" {
@@ -44,7 +46,6 @@ func (b *Brain) wonder(cfg config.Config, question, why string) bool {
 	if open >= curiosityOpen {
 		return false
 	}
-	now := b.Now()
 	b.S.AddIntention(store.Intention{Kind: "curiosity", Text: question, Reason: strings.TrimSpace(why),
 		TriggerAt: now, ExpiresAt: now.Add(curiosityKeeps), Importance: 2, CreatedAt: now})
 	return true
@@ -60,10 +61,41 @@ func (b *Brain) wonderAboutGaps(cfg config.Config) {
 	}
 	people, _ := b.S.People()
 	for _, p := range people {
-		if strings.TrimSpace(p.Relationship) == "" && norm(p.Name) != norm(cfg.UserName) {
+		// Notes that already explain them are an answer; a name that is
+		// another person's pet name is not a person to ask about.
+		if strings.TrimSpace(p.Relationship) == "" && strings.TrimSpace(p.Notes) == "" && norm(p.Name) != norm(cfg.UserName) && !isAliasOfAnother(p, people) {
 			b.wonder(cfg, "Who is "+p.Name+" to you?", "They mentioned "+p.Name+" and I do not know who that is.")
 		}
 	}
+}
+
+// isAliasOfAnother reports whether a person's name is an alias of somebody
+// else in the list.
+func isAliasOfAnother(p store.Person, people []store.Person) bool {
+	for _, o := range people {
+		if o.ID == p.ID {
+			continue
+		}
+		for _, a := range o.Aliases {
+			if norm(a) == norm(p.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stepping reports a message that says they are leaving, resting or not
+// well. Then is no time for a new question.
+func stepping(text string) bool {
+	padded := " " + norm(text) + " "
+	for _, w := range []string{" nap ", " sleep ", " bed ", " rest ", " lie down ", " going out ", " break ", " brb ", " cigarette ", " cigy ", " smoke ",
+		" not feeling well ", " unwell ", " headache ", " tired ", " exhausted ", " good night ", " goodnight "} {
+		if strings.Contains(padded, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // plainQuestion keeps out the questions a small model likes to write and
@@ -84,7 +116,7 @@ func plainQuestion(q string) bool {
 // corrected, not as the very first thing, and not too soon after her
 // last one. When she asks it, it is the only question in the reply.
 func (b *Brain) questionToAsk(intent, text string, recent []store.Event) (store.Intention, bool) {
-	if intent != "chat" || urgent(text, recent) || corrects(text) || len(recent) < 2 {
+	if intent != "chat" || urgent(text, recent) || corrects(text) || stepping(text) || len(recent) < 2 {
 		return store.Intention{}, false
 	}
 	// They are asking her something: that comes first.
@@ -128,25 +160,57 @@ func (b *Brain) learnFromAnswer(said string) {
 		if names[n].For != "unknown" || !strings.Contains(padded, " "+norm(names[n].Name)+" ") {
 			continue
 		}
+		var owner *store.Person
 		for _, word := range strings.Fields(namesIn(said)) {
 			p, ok := b.S.FindPerson(strings.ToLower(word))
 			if !ok || norm(p.Name) == norm(names[n].Name) || norm(word) == norm(names[n].Name) {
 				continue
 			}
-			names[n].For = p.Name
-			changed = true
-			held, _ := b.S.Intentions("open", "sent")
-			for _, i := range held {
-				if i.Kind == "curiosity" && strings.Contains(" "+norm(i.Text)+" ", " "+norm(names[n].Name)+" ") {
-					b.S.SetIntentionStatus(i.ID, "done", b.Now())
-				}
-			}
+			owner = &p
 			break
+		}
+		// "Boo is my wife" names no one, but only one person is her.
+		if owner == nil {
+			owner = b.onlyKin(padded)
+		}
+		if owner == nil {
+			continue
+		}
+		names[n].For = owner.Name
+		changed = true
+		b.addAlias(*owner, names[n].Name, b.Now())
+		held, _ := b.S.Intentions("open", "sent")
+		for _, i := range held {
+			if i.Kind == "curiosity" && strings.Contains(" "+norm(i.Text)+" ", " "+norm(names[n].Name)+" ") {
+				b.S.SetIntentionStatus(i.ID, "done", b.Now())
+			}
 		}
 	}
 	if changed {
 		b.S.SetJSON("nicknames", names)
 	}
+}
+
+// onlyKin finds the one person a message points to by a kin word ("my
+// wife"), when exactly one known person has that relationship.
+func (b *Brain) onlyKin(padded string) *store.Person {
+	people, _ := b.S.People()
+	var found *store.Person
+	for _, kin := range kinWords {
+		if !strings.Contains(padded, " "+kin+" ") {
+			continue
+		}
+		for i := range people {
+			if !strings.Contains(" "+norm(people[i].Relationship)+" ", " "+kin+" ") {
+				continue
+			}
+			if found != nil && found.ID != people[i].ID {
+				return nil
+			}
+			found = &people[i]
+		}
+	}
+	return found
 }
 
 // asked records that a question went out, so it is not asked again and

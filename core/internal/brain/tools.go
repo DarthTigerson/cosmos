@@ -37,7 +37,7 @@ type StepCall struct {
 	Items []string        `json:"items,omitempty"`
 }
 
-var toolNames = []string{"weather.now", "memory.search", "people.find", "calendar.list", "calendar.find", "calendar.add", "calendar.remove", "web.search", "web.read", "lists.add", "lists.show", "lists.done", "lists.remove", "podcasts.heard", "podcasts.listen", "podcasts.find", "books.read"}
+var toolNames = []string{"weather.now", "memory.search", "people.find", "calendar.list", "calendar.find", "calendar.add", "calendar.remove", "web.search", "web.read", "lists.add", "lists.show", "lists.done", "lists.remove", "podcasts.heard", "podcasts.listen", "podcasts.find", "books.read", "self.check"}
 
 const toolHelp = `- weather.now: the weather now, today and tomorrow for a place, compared with her own log of recent days. Args: place (leave empty for the home location).
 - memory.search: look up what she remembers. Args: query.
@@ -52,6 +52,7 @@ const toolHelp = `- weather.now: the weather now, today and tomorrow for a place
 - podcasts.find: search for a podcast show online by its name and get its RSS feed address, from Apple's podcast directory. Use it whenever they ask to search for, look up or find a podcast, want its feed, or want to follow it. Args: query (the show's name only, without "podcast").
 - books.read: what she took from the books she has read, which the user gave her, with the book's own words where they match. Args: query (the topic or words to find; leave empty to see what she read lately).
 - podcasts.listen: queue an older episode of a show she follows, when they ask her to listen to it. Args: query (words from the episode's title, or its date).
+- self.check: how she herself has been running today: which of her models are up, which of her tools failed and why, how often her replies needed fixing, how slow her voice is, and what moved her mood. Use it when they ask whether she is okay, what went wrong, why something did not work, or about her logs or how she is running. Not for small talk about her feelings. No args.
 - lists.add: put things on one of their lists. Args: list ("shopping", "to-do", or any name they use), items (each thing as its own short entry, in their words).
 - lists.show: read a list. Args: list (leave empty for all lists).
 - lists.done: tick things off a list once they are bought or done. Args: list (may be empty), items.
@@ -185,6 +186,9 @@ func (b *Brain) runTool(ctx context.Context, c StepCall) (any, error) {
 
 	case "podcasts.listen":
 		return b.listenToOlder(c.Query)
+
+	case "self.check":
+		return b.selfCheck(ctx)
 
 	case "books.read":
 		return b.searchBooks(c.Query)

@@ -278,11 +278,14 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		Spoken bool `json:"spoken"`
 		// Seen: a picture from her camera, as a data: URI.
 		Seen string `json:"seen"`
+		// Images: pictures the user pasted or dropped into the chat, as
+		// data: URIs.
+		Images []string `json:"images"`
 		// Heard: the number the call gave what was said, so how it was
 		// heard and how soon she answered go in the reply's run.
 		Heard int64 `json:"heard"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 24<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
 		fail(w, 400, "send {\"text\": \"...\"}")
 		return
 	}
@@ -293,8 +296,18 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "seen must be a data:image/ address")
 		return
 	}
-	if in.Spoken || in.Seen != "" {
-		said := brain.Said{Aloud: in.Spoken, Seen: in.Seen}
+	if len(in.Images) > 4 {
+		fail(w, 400, "send at most four images")
+		return
+	}
+	for _, img := range in.Images {
+		if !strings.HasPrefix(img, "data:image/") {
+			fail(w, 400, "images must be data:image/ addresses")
+			return
+		}
+	}
+	if in.Spoken || in.Seen != "" || len(in.Images) > 0 {
+		said := brain.Said{Aloud: in.Spoken, Seen: in.Seen, Pictures: in.Images}
 		if in.Spoken {
 			said.Room = s.B.Room()
 			said.Heard = s.heardSteps(in.Heard)

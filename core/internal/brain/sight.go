@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -173,6 +174,33 @@ func (b *Brain) keepPicture(kind string, data []byte, now time.Time) (store.Imag
 		return store.Image{}, err
 	}
 	return b.S.AddImage(store.Image{Kind: kind, Path: path, CreatedAt: now})
+}
+
+// keepPasted files the pictures the user pasted into the chat and gives
+// back the event details that point at them, so the chat can show them
+// again. A picture that cannot be kept is left out: the message still goes.
+func (b *Brain) keepPasted(pictures []string) json.RawMessage {
+	ids := []int64{}
+	for _, uri := range pictures {
+		_, enc, ok := strings.Cut(uri, ",")
+		if !ok {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(enc)
+		if err != nil {
+			continue
+		}
+		img, err := b.keepPicture("pasted", data, b.Now())
+		if err != nil {
+			continue
+		}
+		ids = append(ids, img.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	meta, _ := json.Marshal(map[string][]int64{"image_ids": ids})
+	return meta
 }
 
 func removeFiles(paths []string) {

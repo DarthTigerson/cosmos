@@ -227,8 +227,16 @@ func (b *Brain) capture(ctx context.Context, userText, before string, sourceEven
 			// The old wording is kept, set aside and linked to the new one.
 			// An "update" that says the same thing changes nothing.
 			if old := known[c.Ref-1]; !dup && norm(old.Content) != n && sharesSubject(cfg.UserName, old.Content, content) {
-				b.S.Supersede(old.ID, store.Memory{Kind: "fact", Category: c.Category, Content: content, Importance: old.Importance,
-					CreatedAt: now, SourceEvent: sourceEvent, Source: clip(userText, 300)})
+				switch {
+				case !dropsDetail(cfg.UserName, old.Content, content):
+					b.S.Supersede(old.ID, store.Memory{Kind: "fact", Category: c.Category, Content: content, Importance: old.Importance,
+						CreatedAt: now, SourceEvent: sourceEvent, Source: clip(userText, 300)})
+				case !coveredBy(cfg.UserName, old.Content, content):
+					// The new wording lost something the old one had: both
+					// stay, so "is 7 years old" survives "is autistic".
+					b.S.AddMemory(store.Memory{Kind: "fact", Category: c.Category, Content: content, CreatedAt: now,
+						SourceEvent: sourceEvent, Source: clip(userText, 300)})
+				}
 			}
 			continue
 		}
@@ -271,12 +279,95 @@ func passing(n string) bool {
 		// "Thomas's name is unknown" is the absence of a fact, usually made
 		// from a question, and it would contradict what she does know.
 		" is feeling ", " feels ", " currently ", " at the moment ", " last night ", " this morning ",
+		// What someone is doing this minute must not overwrite what is
+		// lasting: "smokes a lot" is not "is going out to smoke".
+		" going out ", " is going to ", " about to ", " is heading ", " just now ",
 		" unknown ", " not known ", " unclear ", " does not know ", " doesn t know ", " not sure ", " unsure ", " no information "} {
 		if strings.Contains(padded, w) {
 			return true
 		}
 	}
 	return false
+}
+
+// detailsOf lists the specifics of a fact that are easy to lose when it is
+// reworded: numbers, capitalised names and anything in parentheses, as
+// normalised words. The user's own name is not a detail.
+func detailsOf(userName, text string) []string {
+	skip := norm(userName)
+	out := []string{}
+	add := func(s string) {
+		for _, w := range strings.Fields(norm(s)) {
+			if w != skip && (len(w) >= 2 || strings.ContainsAny(w, "0123456789")) {
+				out = append(out, w)
+			}
+		}
+	}
+	for _, w := range strings.Fields(namesIn(text)) {
+		add(w)
+	}
+	for _, w := range strings.Fields(norm(text)) {
+		if strings.ContainsAny(w, "0123456789") {
+			add(w)
+		}
+	}
+	for rest := text; ; {
+		i := strings.Index(rest, "(")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(rest[i:], ")")
+		if j < 0 {
+			break
+		}
+		add(rest[i+1 : i+j])
+		rest = rest[i+j+1:]
+	}
+	return out
+}
+
+// dropsDetail reports whether rewording an old fact as a new one loses a
+// detail the old one had. A value swapped for another of the same kind
+// ("works at Acme" to "works at Globex") is a real update: it drops one
+// detail but brings one. Losing more than the new wording brings means the
+// new one is a different, narrower fact, not a replacement.
+func dropsDetail(userName, old, new string) bool {
+	have := map[string]bool{}
+	for _, w := range strings.Fields(norm(new)) {
+		have[w] = true
+	}
+	was := map[string]bool{}
+	for _, w := range strings.Fields(norm(old)) {
+		was[w] = true
+	}
+	dropped, brought := 0, 0
+	for _, d := range detailsOf(userName, old) {
+		if !have[d] {
+			dropped++
+		}
+	}
+	for _, d := range detailsOf(userName, new) {
+		if !was[d] {
+			brought++
+		}
+	}
+	return dropped > 0 && brought < dropped
+}
+
+// coveredBy reports whether every meaningful word of the new fact is
+// already in the old one, so there is nothing in it worth keeping.
+func coveredBy(userName, old, new string) bool {
+	skip := strings.ToLower(userName)
+	was := map[string]bool{}
+	for _, t := range tokens(old) {
+		was[t] = true
+	}
+	for _, t := range tokens(new) {
+		if t != skip && !was[t] {
+			return false
+		}
+	}
+	return true
 }
 
 // recent reports whether the user is telling of something that has just
@@ -487,6 +578,25 @@ func (b *Brain) rememberPerson(name, relationship, note string, now time.Time) {
 	if n := " " + norm(note) + " "; strings.HasPrefix(n, " mentioned by") || strings.Contains(n, " this message ") || strings.Contains(n, " no further ") || strings.Contains(n, " not provided ") || strings.Contains(n, " no details ") {
 		note = "" // the model describing its own task, not the person
 	}
+	// Software is not a person: "Claude, LLM model" is a tool he mentioned.
+	// The note only counts when no relationship was given: a friend whose
+	// note says he works in AI is still a friend.
+	what := relationship
+	if placeholder(relationship) {
+		what = note
+	}
+	for _, w := range strings.Fields(norm(what)) {
+		switch w {
+		case "model", "llm", "ai", "assistant", "bot", "software", "app", "tool", "ide", "program":
+			return
+		}
+	}
+	// A pet name for someone already known is one more name for them, not
+	// another person ("Boo" for Bethany).
+	if owner, ok := b.nicknameFor(name, relationship, note); ok {
+		b.addAlias(owner, name, now)
+		return
+	}
 	if p, ok := b.findKnown(name); ok {
 		if note != "" && !strings.Contains(norm(p.Notes), norm(note)) {
 			p.Notes = strings.TrimSpace(p.Notes + "\n" + note)
@@ -511,4 +621,54 @@ func (b *Brain) rememberPerson(name, relationship, note string, now time.Time) {
 		Name: name, Relationship: relationship, Closeness: closenessFor(relationship),
 		Notes: note, LastMentioned: now,
 	}, now)
+}
+
+// nicknameFor reports whom a note or relationship says a name is a pet
+// name for: "nickname for Bethany Bonnici", "Bethany's nickname", "short
+// for Bethany". Only someone she already knows counts.
+func (b *Brain) nicknameFor(name, relationship, note string) (store.Person, bool) {
+	words := strings.Fields(norm(relationship + " " + note))
+	for i := range words {
+		rest := words[i:]
+		var after []string
+		switch {
+		case len(rest) >= 2 && (rest[0] == "nickname" || rest[0] == "short") && (rest[1] == "for" || rest[1] == "of"):
+			after = rest[2:]
+		case len(rest) >= 3 && rest[0] == "pet" && rest[1] == "name" && (rest[2] == "for" || rest[2] == "of"):
+			after = rest[3:]
+		case len(rest) >= 2 && rest[0] == "s" && rest[1] == "nickname" || len(rest) >= 3 && rest[0] == "s" && rest[1] == "pet" && rest[2] == "name":
+			// "Bethany's nickname": the name comes before the marker.
+			for n := min(i, 2); n >= 1; n-- {
+				if p, ok := b.findKnown(strings.Join(words[i-n:i], " ")); ok && norm(p.Name) != norm(name) {
+					return p, true
+				}
+			}
+			continue
+		default:
+			continue
+		}
+		for n := min(len(after), 3); n >= 1; n-- {
+			if p, ok := b.findKnown(strings.Join(after[:n], " ")); ok && norm(p.Name) != norm(name) {
+				return p, true
+			}
+		}
+	}
+	return store.Person{}, false
+}
+
+// addAlias gives a person one more name they go by, unless it is their
+// name already or they have it.
+func (b *Brain) addAlias(p store.Person, alias string, now time.Time) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" || strings.EqualFold(alias, p.Name) {
+		return
+	}
+	for _, a := range p.Aliases {
+		if strings.EqualFold(a, alias) {
+			return
+		}
+	}
+	p.Aliases = append(p.Aliases, alias)
+	p.LastMentioned = now
+	b.S.SavePerson(p, now)
 }

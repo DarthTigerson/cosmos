@@ -99,13 +99,18 @@ func (b *Brain) learnNicknames(ctx context.Context, cfg config.Config, events []
 		}
 		dup := false
 		for _, k := range known {
-			dup = dup || (norm(k.Name) == key && (k.For == who || who == "unknown"))
+			// A name that is already hers, or his own, is not filed again
+			// for someone else.
+			dup = dup || (norm(k.Name) == key && (k.For == who || who == "unknown" || k.For == "companion" || k.For == "user"))
 		}
 		if dup {
 			continue
 		}
 		nick := Nickname{Name: name, For: who, Heard: clip(n.Line, 160), LearnAt: b.Now()}
 		known = append(known, nick)
+		if p, ok := b.S.FindPerson(strings.ToLower(who)); ok {
+			b.addAlias(p, name, b.Now())
+		}
 		learned = append(learned, nick)
 	}
 	if len(learned) > 0 {
@@ -144,20 +149,49 @@ func (b *Brain) dropBorrowedNames(draft string) string {
 		if n.For != "companion" {
 			continue
 		}
-		for {
-			i := strings.Index(strings.ToLower(draft), strings.ToLower(n.Name))
-			if i < 0 {
-				break
+		kept := []string{}
+		for _, line := range splitSentences(draft) {
+			cut := line
+			for {
+				i := strings.Index(strings.ToLower(cut), strings.ToLower(n.Name))
+				if i < 0 {
+					break
+				}
+				before, after := strings.TrimRight(cut[:i], " "), cut[i+len(n.Name):]
+				// "Good to see you, little one." loses the comma with the name.
+				before = strings.TrimSuffix(before, ",")
+				after = strings.TrimPrefix(after, ",")
+				if before != "" && !strings.HasPrefix(after, ".") && !strings.HasPrefix(after, "!") && !strings.HasPrefix(after, "?") && !strings.HasPrefix(after, " ") {
+					after = " " + after
+				}
+				cut = strings.TrimSpace(before + after)
 			}
-			before, after := strings.TrimRight(draft[:i], " "), draft[i+len(n.Name):]
-			// "Good to see you, little one." loses the comma with the name.
-			before = strings.TrimSuffix(before, ",")
-			after = strings.TrimPrefix(after, ",")
-			if before != "" && !strings.HasPrefix(after, ".") && !strings.HasPrefix(after, "!") && !strings.HasPrefix(after, "?") && !strings.HasPrefix(after, " ") {
-				after = " " + after
+			// A sentence that was about the name ("I'll keep calling you
+			// 'little one'") is left as `calling you " "` or "being
+			// called my." without it, and goes as a whole.
+			if cut != line && brokenByCut(cut) {
+				continue
 			}
-			draft = strings.TrimSpace(before + after)
+			kept = append(kept, cut)
 		}
+		draft = strings.Join(kept, " ")
 	}
 	return draft
+}
+
+// brokenByCut reports a sentence left without sense once a name was taken
+// out of it: empty quotes, or a word that needs the name after it.
+func brokenByCut(s string) bool {
+	if strings.Contains(s, `""`) || strings.Contains(s, `" "`) || strings.Contains(s, "“”") || strings.Contains(s, "“ ”") || strings.Contains(s, "''") {
+		return true
+	}
+	words := strings.Fields(norm(s))
+	if len(words) == 0 {
+		return true
+	}
+	switch words[len(words)-1] {
+	case "my", "your", "called", "calling", "call", "as":
+		return true
+	}
+	return false
 }

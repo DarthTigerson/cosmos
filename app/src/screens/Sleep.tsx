@@ -73,7 +73,7 @@ function Kept({ s, user, name }: { s: KeptSession; user: string; name: string })
   )
 }
 
-const kindLabel: Record<Proposal['kind'], string> = { value: 'a value', writing: 'how I write', planning: 'how I plan' }
+const kindLabel: Record<Proposal['kind'], string> = { value: 'a value', writing: 'how I write', planning: 'how I plan', bug: 'a bug I noticed' }
 
 function planWords(mode: string, intent: string): string {
   if (mode === 'once') return `Plan ${intent} requests in one go, up front.`
@@ -85,6 +85,7 @@ function sides(p: Proposal): { now: string; next: string } {
   if (p.kind === 'planning') return { now: planWords(p.before, p.target), next: planWords(p.after, p.target) }
   if (p.kind === 'value' && p.target === 'new') return { now: 'Not one of my values yet.', next: p.after }
   if (p.kind === 'writing') return { now: 'No rule about this yet.', next: p.after }
+  if (p.kind === 'bug') return { now: 'Approving puts it on the cosmos platform tasks list.', next: p.after }
   return { now: p.before, next: p.after }
 }
 

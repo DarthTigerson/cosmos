@@ -15,9 +15,12 @@ import (
 
 // Weather is one look at a place: now, today, and the next hours.
 type Weather struct {
-	Place         string  `json:"place"`
-	TempC         float64 `json:"temp_c"`
-	WindKph       float64 `json:"wind_kph"`
+	Place   string  `json:"place"`
+	TempC   float64 `json:"temp_c"`
+	WindKph float64 `json:"wind_kph"`
+	GustKph float64 `json:"gust_kph"`
+	// WindFrom is where the wind blows from, as a compass point.
+	WindFrom      string  `json:"wind_from"`
 	RainMm        float64 `json:"rain_mm"`
 	Code          int     `json:"-"`
 	Sky           string  `json:"sky"`
@@ -35,6 +38,7 @@ type Day struct {
 	Sky           string  `json:"sky"`
 	RainChancePct int     `json:"rain_chance_pct"`
 	WindMaxKph    float64 `json:"wind_max_kph"`
+	WindFrom      string  `json:"wind_from"`
 }
 
 type Hour struct {
@@ -132,6 +136,8 @@ func (o *OpenMeteo) Fetch(ctx context.Context, place string) (Weather, error) {
 			Code   int     `json:"weather_code"`
 			Precip float64 `json:"precipitation"`
 			Wind   float64 `json:"wind_speed_10m"`
+			Gust   float64 `json:"wind_gusts_10m"`
+			Dir    float64 `json:"wind_direction_10m"`
 		} `json:"current"`
 		Daily struct {
 			Max  []float64  `json:"temperature_2m_max"`
@@ -139,6 +145,7 @@ func (o *OpenMeteo) Fetch(ctx context.Context, place string) (Weather, error) {
 			Prob []*float64 `json:"precipitation_probability_max"`
 			Code []int      `json:"weather_code"`
 			Wind []float64  `json:"wind_speed_10m_max"`
+			Dir  []float64  `json:"wind_direction_10m_dominant"`
 		} `json:"daily"`
 		Hourly struct {
 			Time   []string   `json:"time"`
@@ -150,8 +157,8 @@ func (o *OpenMeteo) Fetch(ctx context.Context, place string) (Weather, error) {
 	fq := url.Values{
 		"latitude":       {fmt.Sprint(hit.Latitude)},
 		"longitude":      {fmt.Sprint(hit.Longitude)},
-		"current":        {"temperature_2m,weather_code,precipitation,wind_speed_10m"},
-		"daily":          {"temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,wind_speed_10m_max"},
+		"current":        {"temperature_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m"},
+		"daily":          {"temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,wind_speed_10m_max,wind_direction_10m_dominant"},
 		"hourly":         {"precipitation,precipitation_probability,weather_code"},
 		"forecast_hours": {"12"},
 		"forecast_days":  {"2"},
@@ -161,7 +168,7 @@ func (o *OpenMeteo) Fetch(ctx context.Context, place string) (Weather, error) {
 		return Weather{}, fmt.Errorf("forecast for %s failed: %w", name, err)
 	}
 	w := Weather{
-		Place: name, TempC: f.Current.Temp, WindKph: f.Current.Wind, RainMm: f.Current.Precip,
+		Place: name, TempC: f.Current.Temp, WindKph: f.Current.Wind, GustKph: f.Current.Gust, WindFrom: compass(f.Current.Dir), RainMm: f.Current.Precip,
 		Code: f.Current.Code, Sky: describeCode(f.Current.Code),
 	}
 	if len(f.Daily.Max) > 0 && len(f.Daily.Min) > 0 {
@@ -180,6 +187,9 @@ func (o *OpenMeteo) Fetch(ctx context.Context, place string) (Weather, error) {
 		}
 		if len(f.Daily.Wind) > 1 {
 			d.WindMaxKph = f.Daily.Wind[1]
+		}
+		if len(f.Daily.Dir) > 1 {
+			d.WindFrom = compass(f.Daily.Dir[1])
 		}
 		w.Tomorrow = &d
 	}
@@ -280,12 +290,21 @@ func (b *Brain) lookAtWeather(ctx context.Context, place string) (Weather, *Comp
 	return w, compare(w, history), nil
 }
 
+// compass turns a wind direction in degrees into the point it blows
+// from: 315 is "north-west". Which side of the house to clear depends on
+// it, and nobody thinks in degrees.
+func compass(deg float64) string {
+	points := []string{"north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"}
+	i := int(math.Mod(deg+22.5+360, 360) / 45)
+	return points[i%8]
+}
+
 // weatherFacts is what a model is shown: whole numbers only, so a reply
 // can be checked against them.
 func weatherFacts(w Weather, c *Comparison) map[string]any {
 	facts := map[string]any{
 		"place": w.Place, "sky": w.Sky,
-		"temp_c": round(w.TempC), "wind_kph": round(w.WindKph), "rain_mm": w.RainMm,
+		"temp_c": round(w.TempC), "wind_kph": round(w.WindKph), "gust_kph": round(w.GustKph), "wind_from": w.WindFrom, "rain_mm": w.RainMm,
 		"today_min_c": round(w.TodayMinC), "today_max_c": round(w.TodayMaxC),
 		"rain_chance_pct": w.RainChancePct,
 	}
@@ -293,7 +312,7 @@ func weatherFacts(w Weather, c *Comparison) map[string]any {
 	// answered with today's numbers.
 	if d := w.Tomorrow; d != nil {
 		facts["tomorrow"] = map[string]any{"sky": d.Sky, "min_c": round(d.MinC), "max_c": round(d.MaxC),
-			"rain_chance_pct": d.RainChancePct, "wind_max_kph": round(d.WindMaxKph)}
+			"rain_chance_pct": d.RainChancePct, "wind_max_kph": round(d.WindMaxKph), "wind_from": d.WindFrom}
 	}
 	// With no history yet there is nothing to compare, and saying so only
 	// tempts the writer to read it out.

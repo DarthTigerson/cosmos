@@ -48,6 +48,9 @@ type Brain struct {
 	// sleeper and the waking models are never in memory together. Nil
 	// leaves the models alone.
 	Rest func(ctx context.Context, asleep bool) error
+	// Health reports on each of her model servers, by tier, for
+	// self.check; nil when nothing launches them.
+	Health func(ctx context.Context) map[string]ServerHealth
 
 	// One model job at a time: every model shares the same GPU.
 	turn sync.Mutex
