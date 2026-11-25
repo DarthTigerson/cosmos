@@ -1,5 +1,5 @@
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { api, useLoad, useSignals } from '../api'
+import { api, copyText, useLoad, useSignals } from '../api'
 import { Avatar, type HerView } from '../avatar/Avatar'
 import { asksToLook, glance } from '../avatar/glance'
 import { FaceAsk, FacePicture } from '../faces'
@@ -176,6 +176,10 @@ export function Nova({ state }: { state: State | null }) {
   // The reply whose checks are open in the side panel, if any.
   const [inspect, setInspect] = useState<{ run: Run; at: string } | null>(null)
   const [inspectError, setInspectError] = useState('')
+  // A reply being read out on request, and the one just copied.
+  const [readOut, setReadOut] = useState<{ id: number; text: string } | null>(null)
+  const [copied, setCopied] = useState<number | null>(null)
+  const copiedTimer = useRef(0)
   const [view, setViewState] = useState<HerView>(firstView)
   const [details, setDetails] = useState(false)
   const [width, setWidthState] = useState(firstWidth)
@@ -344,6 +348,19 @@ export function Nova({ state }: { state: State | null }) {
   }
 
   const name = state?.name ?? 'Companion'
+
+  async function copyReply(id: number, text: string) {
+    try {
+      await copyText(text)
+    } catch (err) {
+      setSendError(`Could not copy: ${(err as Error).message}`)
+      return
+    }
+    setCopied(id)
+    window.clearTimeout(copiedTimer.current)
+    copiedTimer.current = window.setTimeout(() => setCopied(null), 1600)
+  }
+  useEffect(() => () => window.clearTimeout(copiedTimer.current), [])
   const current = live?.find((s) => s.running)
   const steps: LiveStep[] = sending && live ? live : (data?.last_run?.steps ?? []).map((s) => ({ ...s, running: false }))
 
@@ -465,6 +482,40 @@ export function Nova({ state }: { state: State | null }) {
                       </svg>
                     </button>
                   )}
+                  <span className={readOut?.id === m.id || copied === m.id ? 'reply-acts on' : 'reply-acts'}>
+                    <button
+                      type="button"
+                      className={readOut?.id === m.id ? 'mark act playing' : 'mark act'}
+                      aria-label={readOut?.id === m.id ? 'Stop reading' : 'Read it to me'}
+                      title={readOut?.id === m.id ? 'Stop reading' : 'Read it to me'}
+                      onClick={() => setReadOut(readOut?.id === m.id ? null : { id: m.id, text: m.text })}
+                    >
+                      {readOut?.id === m.id ? (
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                          <rect x="4" y="4" width="8" height="8" rx="1.5" />
+                        </svg>
+                      ) : (
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M2.5 6v4h2.5l3.5 3V3L5 6z" />
+                          <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
+                          <path d="M12.8 3.6a6 6 0 0 1 0 8.8" />
+                        </svg>
+                      )}
+                    </button>
+                    <button type="button" className="mark act" aria-label={copied === m.id ? 'Copied' : 'Copy reply'} title={copied === m.id ? 'Copied' : 'Copy reply'} onClick={() => void copyReply(m.id, m.text)}>
+                      {copied === m.id ? (
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3.5 8.5l3 3 6-7" />
+                        </svg>
+                      ) : (
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+                          <rect x="5.5" y="5.5" width="8" height="8" rx="2" />
+                          <path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5" />
+                        </svg>
+                      )}
+                    </button>
+                    {copied === m.id && <span className="copied">Copied</span>}
+                  </span>
                 </span>
                 {m.text.split('\n').filter(Boolean).map((line, i) => (
                   <p key={i}>
@@ -601,7 +652,17 @@ export function Nova({ state }: { state: State | null }) {
             ))}
           </div>
         </div>
-        {state && <Avatar state={state} working={sending} onSay={(words, spoken, heard) => void say(words, spoken, heard)} view={view} mindCount={data?.intentions.length ?? 0} />}
+        {state && (
+          <Avatar
+            state={state}
+            working={sending}
+            onSay={(words, spoken, heard) => void say(words, spoken, heard)}
+            view={view}
+            mindCount={data?.intentions.length ?? 0}
+            readOut={readOut}
+            onReadOut={() => setReadOut(null)}
+          />
+        )}
         {view === 'only' ? (
           <>
             <button type="button" className="her-details-open" aria-expanded={details} onClick={() => setDetails(!details)}>

@@ -51,7 +51,9 @@ const keep = (key: string, value: string) => {
 //   - see: the camera. She decides for herself what to do with it.
 // All three go on whichever way she is shown. The camera stays on until
 // it is turned off, except while she sleeps.
-export function Avatar({ state, working, onSay, view, mindCount }: { state: State | null; working: boolean; onSay: (words: string, spoken: boolean, heard?: number) => void; view: HerView; mindCount: number }) {
+// readOut is a reply the user asked to hear again; onReadOut is told
+// when she has finished saying it, or was stopped.
+export function Avatar({ state, working, onSay, view, mindCount, readOut, onReadOut }: { state: State | null; working: boolean; onSay: (words: string, spoken: boolean, heard?: number) => void; view: HerView; mindCount: number; readOut?: { id: number; text: string } | null; onReadOut?: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<Stage | null>(null)
   const speaker = useRef<Speaker | null>(null)
@@ -109,12 +111,20 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
   say.current = onSay
   // What of the reply being written has already been said aloud.
   const said = useRef<string[]>([])
+  // The reply being read out on request, if any.
+  const reading = useRef<number | null>(null)
+  const readDone = useRef(onReadOut)
+  readDone.current = onReadOut
 
   if (!speaker.current) {
     const sp = new Speaker()
     sp.onMouth = (m) => stage.current?.setMouth(m)
     sp.onState = (on) => {
       setSpeaking(on)
+      if (!on && reading.current !== null) {
+        reading.current = null
+        readDone.current?.()
+      }
       call.current?.setHerSpeaking(on)
       if (!on && !busy.current) letRun()
     }
@@ -138,6 +148,21 @@ export function Avatar({ state, working, onSay, view, mindCount }: { state: Stat
       setReady(false)
     }
   }, [shown])
+
+  // A reply asked for again is read from the start, cutting off whatever
+  // she was saying. Taking the request away stops her.
+  useEffect(() => {
+    const sp = speaker.current!
+    if (!readOut) {
+      if (reading.current !== null) sp.stop()
+      return
+    }
+    reading.current = null // what is cut off here is not this reading ending
+    sp.stop()
+    said.current = []
+    reading.current = readOut.id
+    for (const line of sentences(readOut.text)) sp.say(line)
+  }, [readOut])
 
   // Leaving the screen stops her voice, her ears and her camera.
   useEffect(

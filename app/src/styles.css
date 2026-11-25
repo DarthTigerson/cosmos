@@ -142,7 +142,17 @@ input[type='checkbox'] { width: 18px; min-height: 18px; height: 18px; padding: 0
 .fresh { font-size: 13px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 14px; max-width: 70ch; }
 .bubble { align-self: flex-end; max-width: 70%; background: var(--raised); border-radius: 14px 14px 4px 14px; padding: 11px 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .bubble.waiting { opacity: 0.55; border: 1px dashed var(--line-strong); }
-.reply { display: flex; flex-direction: column; gap: 6px; max-width: 80%; }
+.reply { display: flex; flex-direction: column; gap: 6px; max-width: 80%; margin-left: -12px; padding: 6px 12px 8px; border-radius: 12px; transition: background 0.15s ease; }
+.reply:hover { background: #10141f; }
+/* Read aloud and copy show on the reply under the pointer, and stay while
+   she reads it or it has just been copied. */
+.reply-acts { display: inline-flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.15s ease; }
+.reply:hover .reply-acts, .reply:focus-within .reply-acts, .reply-acts.on { opacity: 1; }
+.mark.act { width: 32px; height: 32px; color: var(--dim); }
+.mark.act:hover { background: var(--raised); color: var(--text); }
+.mark.act.playing { color: var(--nova); background: #2a2416; }
+.mark.act:focus-visible { outline: 2px solid var(--sys); outline-offset: 1px; }
+.reply-acts .copied { margin-left: 4px; color: var(--sys); }
 .weblink { display: inline-flex; align-items: stretch; vertical-align: -4px; max-width: 100%; border: 1px solid #2a4a5e; border-radius: 999px; background: #122431; overflow: hidden; white-space: nowrap; }
 .weblink a { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 1px 8px 1px 9px; color: #a9d3ee; text-decoration: none; font: 400 13px/1.5 var(--mono); }
 .weblink-text { overflow: hidden; text-overflow: ellipsis; }
